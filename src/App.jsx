@@ -4,17 +4,64 @@ import {
   Loader2, Lock, ArrowLeft, Play, Volume2, 
   SpellCheck, Brain, LayoutGrid, Users, Languages, Gift,
   Ticket, Film, Pizza, Utensils, XCircle, RotateCcw,
-  Hourglass, Save, Ear, UserCircle, Edit2, BookOpen, Palette, Popcorn
+  Hourglass, Save, Ear, UserCircle, Edit2, BookOpen, Palette, Popcorn,
+  Database // Icono para indicar carga de disco
 } from 'lucide-react';
 
 // ----------------------------------------------------------------------
 // ⚠️ ATENCIÓN INGENIERO ⚠️
 // PEGA AQUÍ TU API KEY DE GOOGLE GEMINI DENTRO DE LAS COMILLAS.
-// SI ESTO ESTÁ VACÍO (""), OBTENDRÁS UN ERROR 403 (FORBIDDEN).
 // ----------------------------------------------------------------------
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
-// --- MODELOS DE DATOS INDEPENDIENTES ---
+// --- GESTOR DE BASE DE DATOS (IndexedDB) ---
+// Esto permite guardar los audios binary (Blobs) en el disco duro del usuario
+const DB_NAME = 'AventuraLetrasDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'audio_cache';
+
+const openDB = () => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+    };
+    request.onsuccess = (event) => resolve(event.target.result);
+    request.onerror = (event) => reject(event.target.error);
+  });
+};
+
+const getAudioFromDB = async (key) => {
+  try {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORE_NAME], 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.get(key);
+      request.onsuccess = () => resolve(request.result); // Devuelve el Blob o undefined
+      request.onerror = () => reject(request.error);
+    });
+  } catch (e) {
+    console.error("Error leyendo DB:", e);
+    return null;
+  }
+};
+
+const saveAudioToDB = async (key, blob) => {
+  try {
+    const db = await openDB();
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    store.put(blob, key);
+  } catch (e) {
+    console.error("Error guardando en DB:", e);
+  }
+};
+
+// --- MODELOS DE DATOS ---
 
 const VOCABULARIO_ABC = [
   { letra: 'A', esp: 'Avión', eng: 'Apple', emojiEsp: '✈️', emojiEng: '🍎' },
@@ -94,7 +141,7 @@ const PREMIOS = [
 
 // --- UTILIDADES ---
 
-const createWavFile = (pcmDataB64, sampleRate = 24000) => {
+const createWavBlob = (pcmDataB64, sampleRate = 24000) => {
   try {
     const binaryString = atob(pcmDataB64);
     const len = binaryString.length;
@@ -155,7 +202,13 @@ const App = () => {
   const [view, setView] = useState('menu'); 
   const [loadingAudioId, setLoadingAudioId] = useState(null); 
   const audioRef = useRef(null);
-  const audioCache = useRef(new Map()); // CACHÉ EN MEMORIA
+  
+  // CACHÉ EN MEMORIA (Para acceso rápido en la misma sesión)
+  const audioCacheRAM = useRef(new Map()); 
+  
+  // SEMÁFORO DE RED (Para evitar clicks múltiples)
+  const isFetching = useRef(false); 
+  
   const [errorFeedback, setErrorFeedback] = useState(false);
 
   const [heardEsp, setHeardEsp] = useState(false);
@@ -185,7 +238,7 @@ const App = () => {
     }
   };
 
-  const fetchAudio = async (text, voice) => {
+  const fetchAudioFromAPI = async (text, voice) => {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${API_KEY}`;
     const payload = {
       contents: [{ parts: [{ text }] }],
@@ -218,9 +271,8 @@ const App = () => {
           throw new Error("Invalid Response");
         }
         
-        // Si es error 429, no deberíamos reintentar tan agresivamente, pero el backoff ayuda.
         lastError = new Error(`API Error ${response.status}`);
-        if (response.status === 400 || response.status === 403) throw lastError; // No reintentar errores fatales
+        if (response.status === 400 || response.status === 403) throw lastError;
         
       } catch (err) {
         lastError = err;
@@ -231,44 +283,57 @@ const App = () => {
   };
 
   const playTTS = async (text, lang, type, onEnd) => {
+    // 1. SEMÁFORO: Si ya está ocupado descargando algo, abortar.
+    if (isFetching.current) return;
+
     const cacheKey = `${text}-${lang}`;
     const currentRequestId = `${cacheKey}-${Date.now()}`;
     
     cleanupAudio();
-    setLoadingAudioId(currentRequestId);
-
-    // 1. REVISAR CACHÉ
-    if (audioCache.current.has(cacheKey)) {
-      console.log("Playing from cache:", text);
-      const audioUrl = audioCache.current.get(cacheKey);
+    
+    // 2. NIVEL 1: Revisar Caché RAM (Instantáneo)
+    if (audioCacheRAM.current.has(cacheKey)) {
+      console.log("Playing from RAM:", text);
+      const audioUrl = audioCacheRAM.current.get(cacheKey);
       const audio = new Audio(audioUrl);
       audioRef.current = audio;
       audio.onplay = () => { if (onEnd) onEnd(); };
-      audio.onended = () => {
-        setLoadingAudioId(prev => prev === currentRequestId ? null : prev);
-      };
-      try {
-        await audio.play();
-      } catch (e) {
-        console.error("Cache Play Error", e);
-      }
+      try { await audio.play(); } catch (e) { console.error("RAM Play Error", e); }
       return;
     }
 
-    // 2. SI NO ESTÁ EN CACHÉ, PEDIR A LA API
-    const normalizedText = text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
-    const voice = lang === 'es' ? 'Kore' : 'Zephyr';
-    const promptText = lang === 'es' ? `Di alegremente: ${normalizedText}` : `Say cheerfully: ${normalizedText}`;
+    // Activar indicador de carga y bloquear semáforo
+    isFetching.current = true;
+    setLoadingAudioId(currentRequestId);
 
     try {
-      const audioData = await fetchAudio(promptText, voice);
-      const wavBlob = createWavFile(audioData, 24000);
-      if (!wavBlob) throw new Error();
+      let audioBlob;
+
+      // 3. NIVEL 2: Revisar IndexedDB (Persistente)
+      const cachedBlob = await getAudioFromDB(cacheKey);
       
-      const audioUrl = URL.createObjectURL(wavBlob);
-      
-      // GUARDAR EN CACHÉ
-      audioCache.current.set(cacheKey, audioUrl);
+      if (cachedBlob) {
+        console.log("Playing from IndexedDB:", text);
+        audioBlob = cachedBlob;
+      } else {
+        // 4. NIVEL 3: Descargar de API (Costoso)
+        console.log("Fetching from API:", text);
+        const normalizedText = text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+        const voice = lang === 'es' ? 'Kore' : 'Zephyr';
+        const promptText = lang === 'es' ? `Di alegremente: ${normalizedText}` : `Say cheerfully: ${normalizedText}`;
+        
+        const audioData = await fetchAudioFromAPI(promptText, voice);
+        audioBlob = createWavBlob(audioData, 24000);
+        
+        if (!audioBlob) throw new Error("Blob creation failed");
+
+        // GUARDAR: Persistir en IndexedDB para el futuro
+        saveAudioToDB(cacheKey, audioBlob);
+      }
+
+      // Crear URL y guardar en RAM para esta sesión
+      const audioUrl = URL.createObjectURL(audioBlob);
+      audioCacheRAM.current.set(cacheKey, audioUrl);
 
       const audio = new Audio(audioUrl);
       audioRef.current = audio;
@@ -278,10 +343,14 @@ const App = () => {
         setLoadingAudioId(prev => prev === currentRequestId ? null : prev);
       };
       await audio.play();
+
     } catch (e) { 
-      console.error("Audio Error:", e.message);
+      console.error("TTS Error:", e.message);
       setLoadingAudioId(null);
       if (onEnd) onEnd(); 
+    } finally {
+      // Liberar semáforo siempre, pase lo que pase
+      isFetching.current = false;
     }
   };
 
