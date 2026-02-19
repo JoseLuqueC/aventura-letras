@@ -5,17 +5,15 @@ import {
   SpellCheck, Brain, LayoutGrid, Users, Languages, Gift,
   Ticket, Film, Pizza, Utensils, XCircle, RotateCcw,
   Hourglass, Save, Ear, UserCircle, Edit2, BookOpen, Palette, Popcorn,
-  Database // Icono para indicar carga de disco
+  Database, Download, CheckCircle, WifiOff
 } from 'lucide-react';
 
 // ----------------------------------------------------------------------
-// ⚠️ ATENCIÓN INGENIERO ⚠️
-// PEGA AQUÍ TU API KEY DE GOOGLE GEMINI DENTRO DE LAS COMILLAS.
+// ⚠️ PEGA AQUÍ TU API KEY ⚠️
 // ----------------------------------------------------------------------
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 // --- GESTOR DE BASE DE DATOS (IndexedDB) ---
-// Esto permite guardar los audios binary (Blobs) en el disco duro del usuario
 const DB_NAME = 'AventuraLetrasDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'audio_cache';
@@ -41,11 +39,10 @@ const getAudioFromDB = async (key) => {
       const transaction = db.transaction([STORE_NAME], 'readonly');
       const store = transaction.objectStore(STORE_NAME);
       const request = store.get(key);
-      request.onsuccess = () => resolve(request.result); // Devuelve el Blob o undefined
+      request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
   } catch (e) {
-    console.error("Error leyendo DB:", e);
     return null;
   }
 };
@@ -57,12 +54,11 @@ const saveAudioToDB = async (key, blob) => {
     const store = transaction.objectStore(STORE_NAME);
     store.put(blob, key);
   } catch (e) {
-    console.error("Error guardando en DB:", e);
+    console.error("DB Error", e);
   }
 };
 
-// --- MODELOS DE DATOS ---
-
+// --- DATA ---
 const VOCABULARIO_ABC = [
   { letra: 'A', esp: 'Avión', eng: 'Apple', emojiEsp: '✈️', emojiEng: '🍎' },
   { letra: 'B', esp: 'Ballena', eng: 'Bear', emojiEsp: '🐋', emojiEng: '🐻' },
@@ -139,8 +135,6 @@ const PREMIOS = [
   { id: 9, nombre: "Comer fuera", costo: 2000, icon: <Utensils className="w-6 h-6 text-slate-600" /> },
 ];
 
-// --- UTILIDADES ---
-
 const createWavBlob = (pcmDataB64, sampleRate = 24000) => {
   try {
     const binaryString = atob(pcmDataB64);
@@ -167,33 +161,16 @@ const createWavBlob = (pcmDataB64, sampleRate = 24000) => {
     view.setUint32(40, pcmData.length, true);
     return new Blob([wavHeader, pcmData], { type: 'audio/wav' });
   } catch (error) {
-    console.error("Error creating WAV:", error);
+    console.error("WAV Error", error);
     return null;
   }
 };
 
 const App = () => {
-  // --- ESTADOS ---
-  const [stars, setStars] = useState(() => {
-    try {
-      const saved = localStorage.getItem('aventura_stars');
-      return saved !== null ? parseInt(saved, 10) : 0;
-    } catch (e) { return 0; }
-  });
-
-  const [alphabetIdx, setAlphabetIdx] = useState(() => {
-    try {
-      const saved = localStorage.getItem('aventura_alphabetIdx');
-      return saved !== null ? parseInt(saved, 10) : 0;
-    } catch (e) { return 0; }
-  });
-
-  const [spellingIdx, setSpellingIdx] = useState(() => {
-    try {
-      const saved = localStorage.getItem('aventura_spellingIdx');
-      return saved !== null ? parseInt(saved, 10) : 0;
-    } catch (e) { return 0; }
-  });
+  // --- STATE ---
+  const [stars, setStars] = useState(() => { try { return parseInt(localStorage.getItem('aventura_stars') || 0, 10); } catch { return 0; } });
+  const [alphabetIdx, setAlphabetIdx] = useState(() => { try { return parseInt(localStorage.getItem('aventura_alphabetIdx') || 0, 10); } catch { return 0; } });
+  const [spellingIdx, setSpellingIdx] = useState(() => { try { return parseInt(localStorage.getItem('aventura_spellingIdx') || 0, 10); } catch { return 0; } });
 
   useEffect(() => { localStorage.setItem('aventura_stars', stars); }, [stars]);
   useEffect(() => { localStorage.setItem('aventura_alphabetIdx', alphabetIdx); }, [alphabetIdx]);
@@ -201,14 +178,15 @@ const App = () => {
 
   const [view, setView] = useState('menu'); 
   const [loadingAudioId, setLoadingAudioId] = useState(null); 
+  
+  // DOWNLOAD MANAGER STATE
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [totalDownloads, setTotalDownloads] = useState(0);
+  const [isDownloading, setIsDownloading] = useState(false);
+
   const audioRef = useRef(null);
-  
-  // CACHÉ EN MEMORIA (Para acceso rápido en la misma sesión)
   const audioCacheRAM = useRef(new Map()); 
-  
-  // SEMÁFORO DE RED (Para evitar clicks múltiples)
   const isFetching = useRef(false); 
-  
   const [errorFeedback, setErrorFeedback] = useState(false);
 
   const [heardEsp, setHeardEsp] = useState(false);
@@ -228,8 +206,6 @@ const App = () => {
   const [matchOptions, setMatchOptions] = useState({ left: [], right: [] });
   const [matchSelected, setMatchSelected] = useState({ left: null, right: null });
 
-  // --- AUDIO ---
-
   const cleanupAudio = () => {
     if (audioRef.current) {
       audioRef.current.pause();
@@ -242,120 +218,140 @@ const App = () => {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${API_KEY}`;
     const payload = {
       contents: [{ parts: [{ text }] }],
-      generationConfig: { 
-        responseModalities: ["AUDIO"], 
-        speechConfig: { 
-          voiceConfig: { 
-            prebuiltVoiceConfig: { voiceName: voice } 
-          } 
-        } 
-      },
+      generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } },
       model: "gemini-2.5-flash-preview-tts"
     };
 
     let lastError;
-    const delays = [1000, 2000, 4000];
+    const delays = [2000, 4000, 8000]; // Tiempos de espera agresivos para evitar 429
 
     for (let i = 0; i <= delays.length; i++) {
       try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
+        const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         if (response.ok) {
           const data = await response.json();
           const audioData = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
           if (audioData) return audioData;
-          throw new Error("Invalid Response");
         }
-        
-        lastError = new Error(`API Error ${response.status}`);
+        lastError = new Error(`API ${response.status}`);
         if (response.status === 400 || response.status === 403) throw lastError;
-        
-      } catch (err) {
-        lastError = err;
-      }
+      } catch (err) { lastError = err; }
       if (i < delays.length) await new Promise(r => setTimeout(r, delays[i]));
     }
     throw lastError;
   };
 
   const playTTS = async (text, lang, type, onEnd) => {
-    // 1. SEMÁFORO: Si ya está ocupado descargando algo, abortar.
     if (isFetching.current) return;
-
     const cacheKey = `${text}-${lang}`;
-    const currentRequestId = `${cacheKey}-${Date.now()}`;
-    
     cleanupAudio();
     
-    // 2. NIVEL 1: Revisar Caché RAM (Instantáneo)
+    // 1. RAM
     if (audioCacheRAM.current.has(cacheKey)) {
-      console.log("Playing from RAM:", text);
-      const audioUrl = audioCacheRAM.current.get(cacheKey);
-      const audio = new Audio(audioUrl);
+      const audio = new Audio(audioCacheRAM.current.get(cacheKey));
       audioRef.current = audio;
       audio.onplay = () => { if (onEnd) onEnd(); };
-      try { await audio.play(); } catch (e) { console.error("RAM Play Error", e); }
+      try { await audio.play(); } catch (e) {}
       return;
     }
 
-    // Activar indicador de carga y bloquear semáforo
     isFetching.current = true;
-    setLoadingAudioId(currentRequestId);
+    setLoadingAudioId(cacheKey);
 
     try {
       let audioBlob;
-
-      // 3. NIVEL 2: Revisar IndexedDB (Persistente)
+      // 2. DISK
       const cachedBlob = await getAudioFromDB(cacheKey);
-      
       if (cachedBlob) {
-        console.log("Playing from IndexedDB:", text);
         audioBlob = cachedBlob;
       } else {
-        // 4. NIVEL 3: Descargar de API (Costoso)
-        console.log("Fetching from API:", text);
-        const normalizedText = text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+        // 3. API
         const voice = lang === 'es' ? 'Kore' : 'Zephyr';
-        const promptText = lang === 'es' ? `Di alegremente: ${normalizedText}` : `Say cheerfully: ${normalizedText}`;
-        
+        const promptText = lang === 'es' ? `Di alegremente: ${text}` : `Say cheerfully: ${text}`;
         const audioData = await fetchAudioFromAPI(promptText, voice);
         audioBlob = createWavBlob(audioData, 24000);
-        
-        if (!audioBlob) throw new Error("Blob creation failed");
-
-        // GUARDAR: Persistir en IndexedDB para el futuro
-        saveAudioToDB(cacheKey, audioBlob);
+        if (audioBlob) saveAudioToDB(cacheKey, audioBlob);
       }
 
-      // Crear URL y guardar en RAM para esta sesión
-      const audioUrl = URL.createObjectURL(audioBlob);
-      audioCacheRAM.current.set(cacheKey, audioUrl);
-
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
-      
-      audio.onplay = () => { if (onEnd) onEnd(); };
-      audio.onended = () => {
-        setLoadingAudioId(prev => prev === currentRequestId ? null : prev);
-      };
-      await audio.play();
-
-    } catch (e) { 
-      console.error("TTS Error:", e.message);
+      if (audioBlob) {
+        const audioUrl = URL.createObjectURL(audioBlob);
+        audioCacheRAM.current.set(cacheKey, audioUrl);
+        const audio = new Audio(audioUrl);
+        audioRef.current = audio;
+        audio.onplay = () => { if (onEnd) onEnd(); };
+        audio.onended = () => setLoadingAudioId(null);
+        await audio.play();
+      }
+    } catch (e) {
       setLoadingAudioId(null);
-      if (onEnd) onEnd(); 
+      if (onEnd) onEnd();
     } finally {
-      // Liberar semáforo siempre, pase lo que pase
       isFetching.current = false;
     }
   };
 
-  // --- LOGICA DE JUEGOS ---
+  // --- DOWNLOAD MANAGER ---
+  const downloadAllContent = async () => {
+    if (isDownloading) return;
+    if (!API_KEY) { alert("¡Falta la API KEY!"); return; }
+    
+    setIsDownloading(true);
+    
+    // 1. Recolectar todas las palabras únicas
+    const queue = [];
+    
+    // ABC
+    VOCABULARIO_ABC.forEach(i => {
+      queue.push({ text: i.esp, lang: 'es' });
+      queue.push({ text: i.eng, lang: 'en' });
+    });
+    // PAREJAS
+    VOCABULARIO_PAREJAS.forEach(i => {
+      queue.push({ text: i.esp, lang: 'es' });
+      queue.push({ text: i.eng, lang: 'en' });
+    });
+    // SPELLING
+    PALABRAS_DELETREO.forEach(i => {
+      queue.push({ text: i.palabra, lang: 'es' });
+    });
+    // MENSAJES DEL SISTEMA
+    queue.push({ text: "¡Correcto!", lang: 'es' });
+    queue.push({ text: "¡Genial! Ganaste:", lang: 'es' });
 
+    // Eliminar duplicados
+    const uniqueQueue = queue.filter((v,i,a) => a.findIndex(t => (t.text === v.text && t.lang === v.lang)) === i);
+    
+    setTotalDownloads(uniqueQueue.length);
+    setDownloadProgress(0);
+
+    for (let i = 0; i < uniqueQueue.length; i++) {
+      const item = uniqueQueue[i];
+      const cacheKey = `${item.text}-${item.lang}`;
+      
+      // Verificar si ya existe en DB para saltar
+      const exists = await getAudioFromDB(cacheKey);
+      if (!exists) {
+        try {
+          const voice = item.lang === 'es' ? 'Kore' : 'Zephyr';
+          const promptText = item.lang === 'es' ? `Di alegremente: ${item.text}` : `Say cheerfully: ${item.text}`;
+          const audioData = await fetchAudioFromAPI(promptText, voice);
+          const blob = createWavBlob(audioData, 24000);
+          if (blob) await saveAudioToDB(cacheKey, blob);
+          
+          // THROTTLING: Pausa de 1.5s entre descargas para evitar bloqueo
+          await new Promise(r => setTimeout(r, 1500)); 
+        } catch (e) {
+          console.warn("Failed to download:", item.text);
+        }
+      }
+      setDownloadProgress(i + 1);
+    }
+    
+    setIsDownloading(false);
+    alert("¡Descarga completada! Ahora puedes jugar offline.");
+  };
+
+  // --- GAME LOGIC ---
   const initMemory = (players) => {
     setNumPlayers(players);
     setPlayerScores(new Array(players).fill(0));
@@ -470,10 +466,33 @@ const App = () => {
       {view === 'menu' && (
         <div className="w-full max-w-md space-y-4 animate-in zoom-in">
           <h1 className="text-4xl font-black text-indigo-900 text-center mb-8 uppercase tracking-tighter">Mis Desafíos</h1>
+          
+          <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 mb-6">
+            <h3 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2">
+              <Database className="w-5 h-5 text-indigo-500" /> Descargas
+            </h3>
+            {isDownloading ? (
+              <div>
+                <div className="w-full bg-slate-100 h-4 rounded-full overflow-hidden mb-2">
+                  <div className="bg-indigo-500 h-full transition-all duration-300" style={{width: `${(downloadProgress/totalDownloads)*100}%`}}></div>
+                </div>
+                <p className="text-xs font-black text-center text-indigo-500 uppercase">Descargando {downloadProgress} / {totalDownloads}</p>
+              </div>
+            ) : (
+              <button onClick={downloadAllContent} className="w-full bg-slate-800 text-white p-4 rounded-xl font-black flex items-center justify-center gap-2 active:scale-95 hover:bg-slate-700 transition-all">
+                <Download className="w-5 h-5" /> Descargar Todo (Offline)
+              </button>
+            )}
+            <p className="text-[10px] text-slate-400 mt-2 text-center leading-tight">
+              Descarga los audios para jugar sin internet y más rápido. Tardará unos minutos.
+            </p>
+          </div>
+
           <MenuButton icon={<LayoutGrid className="w-8 h-8"/>} label="Abecedario Mágico" color="bg-pink-100" onClick={() => setView('alphabet')} />
           <MenuButton icon={<SpellCheck className="w-8 h-8"/>} label="Escuela de Deletreo" color="bg-blue-100" onClick={() => setView('spelling')} />
           <MenuButton icon={<Brain className="w-8 h-8"/>} label="Memoria Pro" color="bg-purple-100" onClick={() => setView('memory_setup')} />
           <MenuButton icon={<Languages className="w-8 h-8"/>} label="Parejas Flash" color="bg-green-100" onClick={initMatch} />
+          
           <div className="mt-8 pt-8 border-t border-slate-200 w-full flex justify-center">
             <button onClick={() => { if(window.confirm("¿Borrar progreso?")) { setStars(0); setAlphabetIdx(0); setSpellingIdx(0); } }} className="text-xs text-slate-400 flex items-center gap-1"><RotateCcw className="w-3 h-3"/> Resetear</button>
           </div>
@@ -492,11 +511,15 @@ const App = () => {
                   <div className="grid gap-6">
                     <button onClick={() => playTTS(item.esp, 'es', 'abc-es', () => setHeardEsp(true))} className={`p-5 rounded-[2.5rem] border-4 flex flex-col items-center gap-2 transition-all ${heardEsp ? 'bg-green-50 border-green-400' : 'bg-pink-50 border-pink-100 active:scale-95'}`}>
                       <span className="text-6xl mb-1">{item.emojiEsp}</span>
-                      <div className="flex items-center gap-3"><span className="text-2xl font-black text-pink-600 uppercase">{item.esp}</span><Volume2 className={heardEsp ? 'text-green-500' : 'text-pink-300'}/></div>
+                      <div className="flex items-center gap-3"><span className="text-2xl font-black text-pink-600 uppercase">{item.esp}</span>
+                        {loadingAudioId === `${item.esp}-es` ? <Loader2 className="w-5 h-5 animate-spin text-indigo-500" /> : <Volume2 className={heardEsp ? 'text-green-500' : 'text-pink-300'}/>}
+                      </div>
                     </button>
                     <button onClick={() => playTTS(item.eng, 'en', 'abc-en', () => setHeardEng(true))} className={`p-5 rounded-[2.5rem] border-4 flex flex-col items-center gap-2 transition-all ${heardEng ? 'bg-green-50 border-green-400' : 'bg-blue-50 border-blue-100 active:scale-95'}`}>
                       <span className="text-6xl mb-1">{item.emojiEng}</span>
-                      <div className="flex items-center gap-3"><span className="text-2xl font-black text-blue-600 uppercase">{item.eng}</span><Volume2 className={heardEng ? 'text-green-500' : 'text-blue-300'}/></div>
+                      <div className="flex items-center gap-3"><span className="text-2xl font-black text-blue-600 uppercase">{item.eng}</span>
+                        {loadingAudioId === `${item.eng}-en` ? <Loader2 className="w-5 h-5 animate-spin text-indigo-500" /> : <Volume2 className={heardEng ? 'text-green-500' : 'text-blue-300'}/>}
+                      </div>
                     </button>
                   </div>
                 </div>
@@ -507,6 +530,7 @@ const App = () => {
         </div>
       )}
 
+      {/* ... (RESTO DE MÓDULOS IGUALES: Spelling, Memory, Match, Prizes) ... */}
       {view === 'spelling' && (
         <div className="w-full max-w-md flex flex-col gap-6 animate-in zoom-in">
           {(() => {
@@ -589,7 +613,7 @@ const App = () => {
             <div className="flex-1 space-y-4">
               {matchOptions.left.map(item => {
                 const isSelected = matchSelected.left?.id === item.id;
-                const isLoading = loadingAudioId?.includes(item.text);
+                const isLoading = loadingAudioId === `${item.text}-en`;
                 return (
                   <button key={item.id} onClick={() => { setMatchSelected(prev => ({ ...prev, left: item })); playTTS(item.text, 'en', 'match'); }} className={`w-full min-h-[110px] p-4 rounded-[2rem] font-black border-4 transition-all text-xl shadow-sm flex items-center justify-center gap-2 ${isSelected ? 'bg-blue-500 text-white border-blue-700 scale-105 ring-4 ring-blue-200' : 'bg-white text-slate-700 border-slate-100'}`}>
                     {item.text}{isLoading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Volume2 className="w-4 h-4 opacity-50"/>}
