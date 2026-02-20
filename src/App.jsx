@@ -6,7 +6,7 @@ import {
   Film, Pizza, Utensils, RotateCcw,
   UserCircle, Edit2, BookOpen, Palette, Popcorn,
   TabletSmartphone, AlertCircle, Users,
-  Gamepad2, Calculator, Eye
+  Gamepad2, Calculator, Eye, Zap, Type
 } from 'lucide-react';
 
 // --- DATA ---
@@ -121,9 +121,13 @@ const App = () => {
   const [matchOptions, setMatchOptions] = useState({ left: [], right: [] });
   const [matchSelected, setMatchSelected] = useState({ left: null, right: null });
 
-  // --- ESTADOS MINI JUEGOS ---
+  // --- ESTADOS MINI JUEGOS EDUCATIVOS ---
   const [mathGame, setMathGame] = useState({ num1: 1, num2: 1, operator: '+', options: [], answer: 2 });
   const [countGame, setCountGame] = useState({ emoji: '🍎', count: 3, options: [] });
+
+  // --- ESTADOS JUEGO LÚDICO (REACCIÓN) ---
+  const [reactionPos, setReactionPos] = useState(-1);
+  const [reactionHits, setReactionHits] = useState(0);
 
   // --- SAFE TTS (A PRUEBA DE FALLOS) ---
   useEffect(() => {
@@ -165,8 +169,12 @@ const App = () => {
   };
 
   const handleBack = () => {
-    // PRIORIDAD 1: Cambiar vista
-    if (view.startsWith('minigame_') && view !== 'minigames_menu') {
+    // PRIORIDAD 1: Cambiar vista (Manejo de Pila de Navegación)
+    if (['alphabet', 'spelling'].includes(view)) {
+      setView('menu_letras');
+    } else if (['minigame_math', 'minigame_count'].includes(view)) {
+      setView('menu_math');
+    } else if (view === 'minigame_reaction') {
       setView('minigames_menu');
     } else {
       setView('menu');
@@ -259,7 +267,32 @@ const App = () => {
     setView('match_game');
   };
 
-  // --- LOGICA MINI JUEGOS ---
+  // --- LOGICA JUEGO REACCIÓN LÚDICA ---
+  const initReactionGame = () => {
+    setReactionHits(0);
+    setReactionPos(4); // Centro
+    setView('minigame_reaction');
+  };
+
+  useEffect(() => {
+    let interval;
+    if (view === 'minigame_reaction') {
+      interval = setInterval(() => {
+        setReactionPos(Math.floor(Math.random() * 9));
+      }, 750); // Velocidad de aparición (750ms es retador pero justo para 6-8 años)
+    }
+    return () => clearInterval(interval);
+  }, [view]);
+
+  const handleReactionClick = (idx) => {
+    if (idx === reactionPos) {
+      setStars(s => s + 1);
+      setReactionHits(h => h + 1);
+      setReactionPos(-1); // Desaparece al instante para dar feedback de éxito
+    }
+  };
+
+  // --- LOGICA MINI JUEGOS MATEMÁTICOS ---
   const initMathGame = () => {
     const isAddition = Math.random() > 0.5;
     let n1, n2, ans;
@@ -375,8 +408,8 @@ const App = () => {
             </p>
           </div>
 
-          <MenuButton icon={<LayoutGrid className="w-8 h-8"/>} label="Abecedario Mágico" color="bg-pink-100" onClick={() => setView('alphabet')} />
-          <MenuButton icon={<SpellCheck className="w-8 h-8"/>} label="Escuela de Deletreo" color="bg-blue-100" onClick={() => setView('spelling')} />
+          <MenuButton icon={<Type className="w-8 h-8"/>} label="Letras" color="bg-pink-100" onClick={() => setView('menu_letras')} />
+          <MenuButton icon={<Calculator className="w-8 h-8"/>} label="Matemáticas" color="bg-blue-100" onClick={() => setView('menu_math')} />
           <MenuButton icon={<Brain className="w-8 h-8"/>} label="Memoria Pro" color="bg-purple-100" onClick={() => setView('memory_setup')} />
           <MenuButton icon={<Languages className="w-8 h-8"/>} label="Parejas Flash" color="bg-green-100" onClick={initMatch} />
           <MenuButton icon={<Gamepad2 className="w-8 h-8"/>} label="Mini Juegos" color="bg-orange-100" onClick={() => setView('minigames_menu')} />
@@ -384,6 +417,27 @@ const App = () => {
           <div className="mt-8 pt-8 border-t border-slate-200 w-full flex justify-center">
             <button onClick={() => { if(window.confirm("¿Borrar progreso?")) { setStars(0); setAlphabetIdx(0); setSpellingIdx(0); } }} className="text-xs text-slate-400 flex items-center gap-1"><RotateCcw className="w-3 h-3"/> Resetear</button>
           </div>
+        </div>
+      )}
+
+      {/* --- SUB-MENÚS (UX ARCHITECTURE) --- */}
+      {view === 'menu_letras' && (
+        <div className="w-full max-w-md space-y-4 animate-in zoom-in">
+          <div className="relative mb-6">
+            <h2 className="text-3xl font-black text-center text-pink-600 uppercase">Letras</h2>
+          </div>
+          <MenuButton icon={<LayoutGrid className="w-8 h-8"/>} label="Abecedario Mágico" color="bg-pink-100" onClick={() => setView('alphabet')} />
+          <MenuButton icon={<SpellCheck className="w-8 h-8"/>} label="Escuela de Deletreo" color="bg-blue-100" onClick={() => setView('spelling')} />
+        </div>
+      )}
+
+      {view === 'menu_math' && (
+        <div className="w-full max-w-md space-y-4 animate-in zoom-in">
+          <div className="relative mb-6">
+            <h2 className="text-3xl font-black text-center text-blue-600 uppercase">Matemáticas</h2>
+          </div>
+          <MenuButton icon={<Calculator className="w-8 h-8"/>} label="Mate Mágica" color="bg-blue-100" onClick={initMathGame} />
+          <MenuButton icon={<Eye className="w-8 h-8"/>} label="Ojo de Águila" color="bg-emerald-100" onClick={initCountGame} />
         </div>
       )}
 
@@ -395,7 +449,30 @@ const App = () => {
             return (
               <>
                 <div className="bg-white rounded-[3rem] p-8 shadow-2xl border-8 border-white text-center relative">
-                  <h2 className="text-[10rem] font-black text-indigo-600 leading-none mb-10">{item.letra}</h2>
+                  {/* Se agregó onClick asíncrono en cola (Español -> Inglés) y la minúscula */}
+                  <h2 
+                    onClick={() => {
+                      if (!ttsSupported) return;
+                      try { window.speechSynthesis.cancel(); } catch (e) {} // Limpiamos bloqueos previos
+                      setIsPlaying(true);
+                      
+                      const uEs = new SpeechSynthesisUtterance(item.letra);
+                      uEs.lang = 'es-ES';
+                      
+                      const uEn = new SpeechSynthesisUtterance(item.letra);
+                      uEn.lang = 'en-US';
+                      uEn.onend = () => setIsPlaying(false);
+                      uEn.onerror = () => setIsPlaying(false);
+
+                      // Al encolarlas, el navegador las reproduce en orden automático
+                      window.speechSynthesis.speak(uEs);
+                      window.speechSynthesis.speak(uEn);
+                    }}
+                    className="flex justify-center items-baseline gap-4 mb-10 cursor-pointer active:scale-90 transition-transform"
+                  >
+                    <span className="text-[10rem] font-black text-indigo-600 leading-none">{item.letra}</span>
+                    <span className="text-[8rem] font-black text-indigo-300 leading-none">{item.letra.toLowerCase()}</span>
+                  </h2>
                   <div className="grid gap-6">
                     <button onClick={() => { safeSpeak(item.esp, 'es'); setHeardEsp(true); }} className={`p-5 rounded-[2.5rem] border-4 flex flex-col items-center gap-2 transition-all ${heardEsp ? 'bg-green-50 border-green-400' : 'bg-pink-50 border-pink-100 active:scale-95'}`}>
                       <span className="text-6xl mb-1">{item.emojiEsp}</span>
@@ -547,20 +624,46 @@ const App = () => {
         </div>
       )}
 
-      {/* --- VISTAS DE MINI JUEGOS --- */}
+      {/* --- VISTAS DE MINI JUEGOS LÚDICOS --- */}
       {view === 'minigames_menu' && (
         <div className="w-full max-w-md space-y-4 animate-in zoom-in">
           <div className="relative">
             <h2 className="text-3xl font-black text-center text-orange-600 uppercase mb-6">Mini Juegos</h2>
           </div>
           <p className="text-center text-sm font-bold text-slate-500 mb-4 bg-orange-50 p-3 rounded-xl border border-orange-100">
-            Gana 2 estrellas rápidas por acierto
+            Pon a prueba tus reflejos y diviértete.
           </p>
-          <MenuButton icon={<Calculator className="w-8 h-8"/>} label="Mate Mágica" color="bg-blue-100" onClick={initMathGame} />
-          <MenuButton icon={<Eye className="w-8 h-8"/>} label="Ojo de Águila" color="bg-emerald-100" onClick={initCountGame} />
+          <MenuButton icon={<Zap className="w-8 h-8"/>} label="Atrapa la Rana" color="bg-orange-100" onClick={initReactionGame} />
         </div>
       )}
 
+      {view === 'minigame_reaction' && (
+        <div className="w-full max-w-md flex flex-col gap-6 animate-in zoom-in">
+          <div className="bg-white rounded-[3.5rem] p-8 shadow-2xl border-8 border-white text-center">
+            <h2 className="text-2xl font-black text-orange-500 uppercase mb-2">¡Atrápala!</h2>
+            <p className="text-slate-400 font-bold mb-6">Ranas cazadas: <span className="text-orange-500">{reactionHits}</span></p>
+            
+            <div className="grid grid-cols-3 gap-3 bg-orange-50 p-4 rounded-3xl">
+              {Array.from({length: 9}).map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleReactionClick(i)}
+                  className={`aspect-square rounded-2xl flex items-center justify-center text-5xl transition-all duration-100 ${
+                    reactionPos === i 
+                    ? 'bg-green-400 scale-105 shadow-md active:scale-90' 
+                    : 'bg-slate-200 opacity-50'
+                  }`}
+                >
+                  {reactionPos === i ? '🐸' : ''}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-slate-400 font-bold mt-6 uppercase">Toca la rana antes de que escape</p>
+          </div>
+        </div>
+      )}
+
+      {/* --- VISTAS DE MATEMÁTICAS --- */}
       {view === 'minigame_math' && (
         <div className={`w-full max-w-md flex flex-col gap-6 animate-in zoom-in ${errorFeedback ? 'animate-shake' : ''}`}>
           <div className="bg-white rounded-[3.5rem] p-10 shadow-2xl border-8 border-white text-center">
