@@ -1,62 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Sparkles, Heart, Star, IceCream, Bike, TreePine, 
-  Loader2, Lock, ArrowLeft, Play, Volume2, 
-  SpellCheck, Brain, LayoutGrid, Users, Languages, Gift,
-  Ticket, Film, Pizza, Utensils, XCircle, RotateCcw,
-  Hourglass, Save, Ear, UserCircle, Edit2, BookOpen, Palette, Popcorn,
-  Database, Download, CheckCircle, WifiOff
+  Sparkles, Star, IceCream, Bike, 
+  Loader2, Lock, ArrowLeft, Volume2, 
+  SpellCheck, Brain, LayoutGrid, Languages, Gift,
+  Film, Pizza, Utensils, RotateCcw,
+  UserCircle, Edit2, BookOpen, Palette, Popcorn,
+  TabletSmartphone, AlertCircle, Users,
+  Gamepad2, Calculator, Eye
 } from 'lucide-react';
-
-// ----------------------------------------------------------------------
-// ⚠️ PEGA AQUÍ TU API KEY ⚠️
-// ----------------------------------------------------------------------
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-
-// --- GESTOR DE BASE DE DATOS (IndexedDB) ---
-const DB_NAME = 'AventuraLetrasDB';
-const DB_VERSION = 1;
-const STORE_NAME = 'audio_cache';
-
-const openDB = () => {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = (event) => {
-      const db = event.target.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
-      }
-    };
-    request.onsuccess = (event) => resolve(event.target.result);
-    request.onerror = (event) => reject(event.target.error);
-  });
-};
-
-const getAudioFromDB = async (key) => {
-  try {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([STORE_NAME], 'readonly');
-      const store = transaction.objectStore(STORE_NAME);
-      const request = store.get(key);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  } catch (e) {
-    return null;
-  }
-};
-
-const saveAudioToDB = async (key, blob) => {
-  try {
-    const db = await openDB();
-    const transaction = db.transaction([STORE_NAME], 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    store.put(blob, key);
-  } catch (e) {
-    console.error("DB Error", e);
-  }
-};
 
 // --- DATA ---
 const VOCABULARIO_ABC = [
@@ -135,37 +86,6 @@ const PREMIOS = [
   { id: 9, nombre: "Comer fuera", costo: 2000, icon: <Utensils className="w-6 h-6 text-slate-600" /> },
 ];
 
-const createWavBlob = (pcmDataB64, sampleRate = 24000) => {
-  try {
-    const binaryString = atob(pcmDataB64);
-    const len = binaryString.length;
-    const pcmData = new Uint8Array(len);
-    for (let i = 0; i < len; i++) { pcmData[i] = binaryString.charCodeAt(i); }
-    const wavHeader = new ArrayBuffer(44);
-    const view = new DataView(wavHeader);
-    const writeString = (offset, string) => {
-      for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
-    };
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + pcmData.length, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, pcmData.length, true);
-    return new Blob([wavHeader, pcmData], { type: 'audio/wav' });
-  } catch (error) {
-    console.error("WAV Error", error);
-    return null;
-  }
-};
-
 const App = () => {
   // --- STATE ---
   const [stars, setStars] = useState(() => { try { return parseInt(localStorage.getItem('aventura_stars') || 0, 10); } catch { return 0; } });
@@ -177,18 +97,13 @@ const App = () => {
   useEffect(() => { localStorage.setItem('aventura_spellingIdx', spellingIdx); }, [spellingIdx]);
 
   const [view, setView] = useState('menu'); 
-  const [loadingAudioId, setLoadingAudioId] = useState(null); 
-  
-  // DOWNLOAD MANAGER STATE
-  const [downloadProgress, setDownloadProgress] = useState(0);
-  const [totalDownloads, setTotalDownloads] = useState(0);
-  const [isDownloading, setIsDownloading] = useState(false);
-
-  const audioRef = useRef(null);
-  const audioCacheRAM = useRef(new Map()); 
-  const isFetching = useRef(false); 
   const [errorFeedback, setErrorFeedback] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  
+  // Debug State para Tablet
+  const [ttsSupported, setTtsSupported] = useState(true);
 
+  // Estados de juegos
   const [heardEsp, setHeardEsp] = useState(false);
   const [heardEng, setHeardEng] = useState(false);
   const [typed, setTyped] = useState('');
@@ -206,149 +121,62 @@ const App = () => {
   const [matchOptions, setMatchOptions] = useState({ left: [], right: [] });
   const [matchSelected, setMatchSelected] = useState({ left: null, right: null });
 
-  const cleanupAudio = () => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = "";
-      audioRef.current = null;
-    }
-  };
+  // --- ESTADOS MINI JUEGOS ---
+  const [mathGame, setMathGame] = useState({ num1: 1, num2: 1, operator: '+', options: [], answer: 2 });
+  const [countGame, setCountGame] = useState({ emoji: '🍎', count: 3, options: [] });
 
-  const fetchAudioFromAPI = async (text, voice) => {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${API_KEY}`;
-    const payload = {
-      contents: [{ parts: [{ text }] }],
-      generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } },
-      model: "gemini-2.5-flash-preview-tts"
+  // --- SAFE TTS (A PRUEBA DE FALLOS) ---
+  useEffect(() => {
+    // Verificar soporte al cargar
+    if (!('speechSynthesis' in window)) {
+      setTtsSupported(false);
+    } else {
+      // Truco para cargar voces en Chrome/Android
+      window.speechSynthesis.getVoices();
+    }
+  }, []);
+
+  const safeSpeak = (text, lang = 'es') => {
+    if (!ttsSupported) return;
+
+    // 1. Cancelar cualquier audio previo (Try-catch para seguridad)
+    try { window.speechSynthesis.cancel(); } catch (e) { console.error(e); }
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    // 2. Configuración MÍNIMA para máxima compatibilidad
+    utterance.lang = lang === 'es' ? 'es-ES' : 'en-US';
+    // Removemos rate y pitch para evitar crashes en motores viejos de tablet
+    
+    utterance.onstart = () => setIsPlaying(true);
+    utterance.onend = () => setIsPlaying(false);
+    utterance.onerror = (e) => {
+      console.error("TTS Error:", e);
+      setIsPlaying(false);
     };
 
-    let lastError;
-    const delays = [2000, 4000, 8000]; // Tiempos de espera agresivos para evitar 429
-
-    for (let i = 0; i <= delays.length; i++) {
-      try {
-        const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        if (response.ok) {
-          const data = await response.json();
-          const audioData = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
-          if (audioData) return audioData;
-        }
-        lastError = new Error(`API ${response.status}`);
-        if (response.status === 400 || response.status === 403) throw lastError;
-      } catch (err) { lastError = err; }
-      if (i < delays.length) await new Promise(r => setTimeout(r, delays[i]));
-    }
-    throw lastError;
-  };
-
-  const playTTS = async (text, lang, type, onEnd) => {
-    if (isFetching.current) return;
-    const cacheKey = `${text}-${lang}`;
-    cleanupAudio();
-    
-    // 1. RAM
-    if (audioCacheRAM.current.has(cacheKey)) {
-      const audio = new Audio(audioCacheRAM.current.get(cacheKey));
-      audioRef.current = audio;
-      audio.onplay = () => { if (onEnd) onEnd(); };
-      try { await audio.play(); } catch (e) {}
-      return;
-    }
-
-    isFetching.current = true;
-    setLoadingAudioId(cacheKey);
-
+    // 3. Disparar
     try {
-      let audioBlob;
-      // 2. DISK
-      const cachedBlob = await getAudioFromDB(cacheKey);
-      if (cachedBlob) {
-        audioBlob = cachedBlob;
-      } else {
-        // 3. API
-        const voice = lang === 'es' ? 'Kore' : 'Zephyr';
-        const promptText = lang === 'es' ? `Di alegremente: ${text}` : `Say cheerfully: ${text}`;
-        const audioData = await fetchAudioFromAPI(promptText, voice);
-        audioBlob = createWavBlob(audioData, 24000);
-        if (audioBlob) saveAudioToDB(cacheKey, audioBlob);
-      }
-
-      if (audioBlob) {
-        const audioUrl = URL.createObjectURL(audioBlob);
-        audioCacheRAM.current.set(cacheKey, audioUrl);
-        const audio = new Audio(audioUrl);
-        audioRef.current = audio;
-        audio.onplay = () => { if (onEnd) onEnd(); };
-        audio.onended = () => setLoadingAudioId(null);
-        await audio.play();
-      }
+      window.speechSynthesis.speak(utterance);
     } catch (e) {
-      setLoadingAudioId(null);
-      if (onEnd) onEnd();
-    } finally {
-      isFetching.current = false;
+      console.error("Speak failed", e);
+      setIsPlaying(false);
     }
   };
 
-  // --- DOWNLOAD MANAGER ---
-  const downloadAllContent = async () => {
-    if (isDownloading) return;
-    if (!API_KEY) { alert("¡Falta la API KEY!"); return; }
-    
-    setIsDownloading(true);
-    
-    // 1. Recolectar todas las palabras únicas
-    const queue = [];
-    
-    // ABC
-    VOCABULARIO_ABC.forEach(i => {
-      queue.push({ text: i.esp, lang: 'es' });
-      queue.push({ text: i.eng, lang: 'en' });
-    });
-    // PAREJAS
-    VOCABULARIO_PAREJAS.forEach(i => {
-      queue.push({ text: i.esp, lang: 'es' });
-      queue.push({ text: i.eng, lang: 'en' });
-    });
-    // SPELLING
-    PALABRAS_DELETREO.forEach(i => {
-      queue.push({ text: i.palabra, lang: 'es' });
-    });
-    // MENSAJES DEL SISTEMA
-    queue.push({ text: "¡Correcto!", lang: 'es' });
-    queue.push({ text: "¡Genial! Ganaste:", lang: 'es' });
-
-    // Eliminar duplicados
-    const uniqueQueue = queue.filter((v,i,a) => a.findIndex(t => (t.text === v.text && t.lang === v.lang)) === i);
-    
-    setTotalDownloads(uniqueQueue.length);
-    setDownloadProgress(0);
-
-    for (let i = 0; i < uniqueQueue.length; i++) {
-      const item = uniqueQueue[i];
-      const cacheKey = `${item.text}-${item.lang}`;
-      
-      // Verificar si ya existe en DB para saltar
-      const exists = await getAudioFromDB(cacheKey);
-      if (!exists) {
-        try {
-          const voice = item.lang === 'es' ? 'Kore' : 'Zephyr';
-          const promptText = item.lang === 'es' ? `Di alegremente: ${item.text}` : `Say cheerfully: ${item.text}`;
-          const audioData = await fetchAudioFromAPI(promptText, voice);
-          const blob = createWavBlob(audioData, 24000);
-          if (blob) await saveAudioToDB(cacheKey, blob);
-          
-          // THROTTLING: Pausa de 1.5s entre descargas para evitar bloqueo
-          await new Promise(r => setTimeout(r, 1500)); 
-        } catch (e) {
-          console.warn("Failed to download:", item.text);
-        }
-      }
-      setDownloadProgress(i + 1);
+  const handleBack = () => {
+    // PRIORIDAD 1: Cambiar vista
+    if (view.startsWith('minigame_') && view !== 'minigames_menu') {
+      setView('minigames_menu');
+    } else {
+      setView('menu');
     }
     
-    setIsDownloading(false);
-    alert("¡Descarga completada! Ahora puedes jugar offline.");
+    // PRIORIDAD 2: Limpiar audio (en segundo plano, sin bloquear)
+    setTimeout(() => {
+      try { window.speechSynthesis.cancel(); } catch (e) {}
+      setIsPlaying(false);
+    }, 0);
   };
 
   // --- GAME LOGIC ---
@@ -370,7 +198,7 @@ const App = () => {
 
   const handleCardClick = (card) => {
     if (waitingToClear || selectedCards.length === 2 || solvedPairs.includes(card.match) || selectedCards.find(c => c.id === card.id)) return;
-    if (card.type === 'text') playTTS(card.val, 'es', 'memory');
+    if (card.type === 'text') safeSpeak(card.val, 'es');
 
     const newSelection = [...selectedCards, card];
     setSelectedCards(newSelection);
@@ -409,7 +237,7 @@ const App = () => {
       setTyped(newTyped);
       if (newTyped === item.palabra) {
         setStars(s => s + 10);
-        playTTS(item.palabra, 'es', 'spelling');
+        safeSpeak("¡Muy bien! " + item.palabra, 'es');
         setSpellingIdx((spellingIdx + 1) % PALABRAS_DELETREO.length);
         setTyped('');
       }
@@ -431,6 +259,72 @@ const App = () => {
     setView('match_game');
   };
 
+  // --- LOGICA MINI JUEGOS ---
+  const initMathGame = () => {
+    const isAddition = Math.random() > 0.5;
+    let n1, n2, ans;
+    if (isAddition) {
+      n1 = Math.floor(Math.random() * 10) + 1;
+      n2 = Math.floor(Math.random() * 10) + 1;
+      ans = n1 + n2;
+    } else {
+      n1 = Math.floor(Math.random() * 10) + 5; // 5 a 14
+      n2 = Math.floor(Math.random() * (n1 - 1)) + 1; // asegura resultado positivo
+      ans = n1 - n2;
+    }
+    
+    const opts = new Set([ans]);
+    while(opts.size < 4) {
+      opts.add(Math.max(1, ans + Math.floor(Math.random() * 7) - 3));
+    }
+    
+    setMathGame({
+      num1: n1, num2: n2, operator: isAddition ? '+' : '-', 
+      answer: ans, options: Array.from(opts).sort(() => Math.random() - 0.5)
+    });
+    setView('minigame_math');
+  };
+
+  const handleMathClick = (opt) => {
+    if (opt === mathGame.answer) {
+      setStars(s => s + 2);
+      safeSpeak("¡Correcto! Qué inteligente", 'es');
+      setTimeout(initMathGame, 1000);
+    } else {
+      safeSpeak("Casi, intenta otra vez", 'es');
+      setErrorFeedback(true);
+      setTimeout(() => setErrorFeedback(false), 500);
+    }
+  };
+
+  const initCountGame = () => {
+    const emojis = ['🍎', '🐶', '🚗', '⭐', '🎈', '🍕', '🐱', '🦖', '🍦'];
+    const emj = emojis[Math.floor(Math.random() * emojis.length)];
+    const cnt = Math.floor(Math.random() * 7) + 3; // 3 a 9
+    
+    const opts = new Set([cnt]);
+    while(opts.size < 4) {
+      opts.add(Math.max(1, cnt + Math.floor(Math.random() * 5) - 2));
+    }
+
+    setCountGame({
+      emoji: emj, count: cnt, options: Array.from(opts).sort(() => Math.random() - 0.5)
+    });
+    setView('minigame_count');
+  };
+
+  const handleCountClick = (opt) => {
+    if (opt === countGame.count) {
+      setStars(s => s + 2);
+      safeSpeak("¡Excelente vista!", 'es');
+      setTimeout(initCountGame, 1000);
+    } else {
+      safeSpeak("Cuenta con cuidado", 'es');
+      setErrorFeedback(true);
+      setTimeout(() => setErrorFeedback(false), 500);
+    }
+  };
+
   useEffect(() => {
     if (matchSelected.left && matchSelected.right) {
       if (matchSelected.left.match === matchSelected.right.id) {
@@ -439,7 +333,7 @@ const App = () => {
           left: prev.left.filter(i => i.id !== matchSelected.left.id),
           right: prev.right.filter(i => i.id !== matchSelected.right.id)
         }));
-        playTTS("¡Correcto!", "es", "match");
+        safeSpeak("¡Correcto!", "es");
       } else {
         setStars(s => Math.max(0, s - 5));
         setErrorFeedback(true);
@@ -452,7 +346,11 @@ const App = () => {
   return (
     <div className={`min-h-screen p-4 font-sans select-none flex flex-col items-center transition-colors duration-300 ${errorFeedback ? 'bg-red-100' : 'bg-slate-50'}`}>
       <div className="w-full max-w-2xl flex justify-between items-center mb-6">
-        <button onClick={() => { cleanupAudio(); setView('menu'); }} className="bg-white p-3 rounded-2xl shadow-sm text-indigo-500 active:scale-95 border border-indigo-50"><ArrowLeft/></button>
+        {/* BOTÓN ATRÁS CORREGIDO: Lógica desacoplada */}
+        <button onClick={handleBack} className="bg-white p-3 rounded-2xl shadow-sm text-indigo-500 active:scale-95 border border-indigo-50 cursor-pointer z-50">
+          <ArrowLeft/>
+        </button>
+        
         <div className="flex gap-3">
           <button onClick={() => setView('prizes')} className="bg-gradient-to-r from-pink-500 to-rose-500 px-6 py-2 rounded-full shadow-lg text-white font-black flex items-center gap-2 active:scale-95">
             <Gift className="w-5 h-5"/> TIENDA
@@ -467,24 +365,13 @@ const App = () => {
         <div className="w-full max-w-md space-y-4 animate-in zoom-in">
           <h1 className="text-4xl font-black text-indigo-900 text-center mb-8 uppercase tracking-tighter">Mis Desafíos</h1>
           
-          <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 mb-6">
-            <h3 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2">
-              <Database className="w-5 h-5 text-indigo-500" /> Descargas
-            </h3>
-            {isDownloading ? (
-              <div>
-                <div className="w-full bg-slate-100 h-4 rounded-full overflow-hidden mb-2">
-                  <div className="bg-indigo-500 h-full transition-all duration-300" style={{width: `${(downloadProgress/totalDownloads)*100}%`}}></div>
-                </div>
-                <p className="text-xs font-black text-center text-indigo-500 uppercase">Descargando {downloadProgress} / {totalDownloads}</p>
-              </div>
-            ) : (
-              <button onClick={downloadAllContent} className="w-full bg-slate-800 text-white p-4 rounded-xl font-black flex items-center justify-center gap-2 active:scale-95 hover:bg-slate-700 transition-all">
-                <Download className="w-5 h-5" /> Descargar Todo (Offline)
-              </button>
-            )}
-            <p className="text-[10px] text-slate-400 mt-2 text-center leading-tight">
-              Descarga los audios para jugar sin internet y más rápido. Tardará unos minutos.
+          {/* INDICADOR DE ESTADO DE AUDIO */}
+          <div className={`p-4 rounded-xl flex items-center gap-3 border mb-6 ${ttsSupported ? 'bg-blue-50 border-blue-100' : 'bg-red-50 border-red-100'}`}>
+            {ttsSupported ? <TabletSmartphone className="w-6 h-6 text-blue-500" /> : <AlertCircle className="w-6 h-6 text-red-500" />}
+            <p className={`text-xs font-bold leading-tight ${ttsSupported ? 'text-blue-600' : 'text-red-600'}`}>
+              {ttsSupported 
+                ? "Modo Voz Nativa Activo (Tablet/Celular)" 
+                : "Tu dispositivo no soporta Voz. Intenta actualizar Chrome."}
             </p>
           </div>
 
@@ -492,6 +379,7 @@ const App = () => {
           <MenuButton icon={<SpellCheck className="w-8 h-8"/>} label="Escuela de Deletreo" color="bg-blue-100" onClick={() => setView('spelling')} />
           <MenuButton icon={<Brain className="w-8 h-8"/>} label="Memoria Pro" color="bg-purple-100" onClick={() => setView('memory_setup')} />
           <MenuButton icon={<Languages className="w-8 h-8"/>} label="Parejas Flash" color="bg-green-100" onClick={initMatch} />
+          <MenuButton icon={<Gamepad2 className="w-8 h-8"/>} label="Mini Juegos" color="bg-orange-100" onClick={() => setView('minigames_menu')} />
           
           <div className="mt-8 pt-8 border-t border-slate-200 w-full flex justify-center">
             <button onClick={() => { if(window.confirm("¿Borrar progreso?")) { setStars(0); setAlphabetIdx(0); setSpellingIdx(0); } }} className="text-xs text-slate-400 flex items-center gap-1"><RotateCcw className="w-3 h-3"/> Resetear</button>
@@ -509,38 +397,36 @@ const App = () => {
                 <div className="bg-white rounded-[3rem] p-8 shadow-2xl border-8 border-white text-center relative">
                   <h2 className="text-[10rem] font-black text-indigo-600 leading-none mb-10">{item.letra}</h2>
                   <div className="grid gap-6">
-                    <button onClick={() => playTTS(item.esp, 'es', 'abc-es', () => setHeardEsp(true))} className={`p-5 rounded-[2.5rem] border-4 flex flex-col items-center gap-2 transition-all ${heardEsp ? 'bg-green-50 border-green-400' : 'bg-pink-50 border-pink-100 active:scale-95'}`}>
+                    <button onClick={() => { safeSpeak(item.esp, 'es'); setHeardEsp(true); }} className={`p-5 rounded-[2.5rem] border-4 flex flex-col items-center gap-2 transition-all ${heardEsp ? 'bg-green-50 border-green-400' : 'bg-pink-50 border-pink-100 active:scale-95'}`}>
                       <span className="text-6xl mb-1">{item.emojiEsp}</span>
                       <div className="flex items-center gap-3"><span className="text-2xl font-black text-pink-600 uppercase">{item.esp}</span>
-                        {loadingAudioId === `${item.esp}-es` ? <Loader2 className="w-5 h-5 animate-spin text-indigo-500" /> : <Volume2 className={heardEsp ? 'text-green-500' : 'text-pink-300'}/>}
+                        {isPlaying ? <Volume2 className="animate-pulse text-indigo-500" /> : <Volume2 className={heardEsp ? 'text-green-500' : 'text-pink-300'}/>}
                       </div>
                     </button>
-                    <button onClick={() => playTTS(item.eng, 'en', 'abc-en', () => setHeardEng(true))} className={`p-5 rounded-[2.5rem] border-4 flex flex-col items-center gap-2 transition-all ${heardEng ? 'bg-green-50 border-green-400' : 'bg-blue-50 border-blue-100 active:scale-95'}`}>
+                    <button onClick={() => { safeSpeak(item.eng, 'en'); setHeardEng(true); }} className={`p-5 rounded-[2.5rem] border-4 flex flex-col items-center gap-2 transition-all ${heardEng ? 'bg-green-50 border-green-400' : 'bg-blue-50 border-blue-100 active:scale-95'}`}>
                       <span className="text-6xl mb-1">{item.emojiEng}</span>
                       <div className="flex items-center gap-3"><span className="text-2xl font-black text-blue-600 uppercase">{item.eng}</span>
-                        {loadingAudioId === `${item.eng}-en` ? <Loader2 className="w-5 h-5 animate-spin text-indigo-500" /> : <Volume2 className={heardEng ? 'text-green-500' : 'text-blue-300'}/>}
+                        {isPlaying ? <Volume2 className="animate-pulse text-indigo-500" /> : <Volume2 className={heardEng ? 'text-green-500' : 'text-blue-300'}/>}
                       </div>
                     </button>
                   </div>
                 </div>
-                <button disabled={!ready} onClick={() => { setStars(s => s+5); setAlphabetIdx(alphabetIdx+1); setHeardEsp(false); setHeardEng(false); cleanupAudio(); }} className={`py-6 rounded-[2.5rem] text-3xl font-black shadow-xl border-b-8 flex items-center justify-center gap-3 transition-all ${ready ? 'bg-indigo-600 border-indigo-800 text-white active:translate-y-1 active:border-b-4' : 'bg-slate-300 border-slate-400 text-slate-100 cursor-not-allowed'}`}>{!ready ? <Lock className="w-8 h-8" /> : <Sparkles className="w-8 h-8" />} SIGUIENTE</button>
+                <button disabled={!ready} onClick={() => { setStars(s => s+5); setAlphabetIdx(alphabetIdx+1); setHeardEsp(false); setHeardEng(false); try { window.speechSynthesis.cancel(); } catch(e){} }} className={`py-6 rounded-[2.5rem] text-3xl font-black shadow-xl border-b-8 flex items-center justify-center gap-3 transition-all ${ready ? 'bg-indigo-600 border-indigo-800 text-white active:translate-y-1 active:border-b-4' : 'bg-slate-300 border-slate-400 text-slate-100 cursor-not-allowed'}`}>{!ready ? <Lock className="w-8 h-8" /> : <Sparkles className="w-8 h-8" />} SIGUIENTE</button>
               </>
             );
           })()}
         </div>
       )}
 
-      {/* ... (RESTO DE MÓDULOS IGUALES: Spelling, Memory, Match, Prizes) ... */}
       {view === 'spelling' && (
         <div className="w-full max-w-md flex flex-col gap-6 animate-in zoom-in">
           {(() => {
             const item = PALABRAS_DELETREO[spellingIdx % PALABRAS_DELETREO.length];
-            const isLoading = loadingAudioId?.includes(item.palabra);
             return (
               <div className="bg-white rounded-[3.5rem] p-10 shadow-2xl border-8 border-white text-center">
                 <div className="text-9xl mb-4">{item.emoji}</div>
-                <button onClick={() => playTTS(item.palabra, 'es', 'spelling')} disabled={isLoading} className="mx-auto mb-8 flex items-center gap-2 px-6 py-2 rounded-full font-black text-lg bg-indigo-100 text-indigo-600 active:scale-95">
-                  {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Volume2 className="w-5 h-5" />} Escuchar Palabra
+                <button onClick={() => safeSpeak(item.palabra, 'es')} className="mx-auto mb-8 flex items-center gap-2 px-6 py-2 rounded-full font-black text-lg bg-indigo-100 text-indigo-600 active:scale-95">
+                  <Volume2 className="w-5 h-5" /> Escuchar Palabra
                 </button>
                 <div className="flex justify-center flex-wrap gap-2 mb-10">{item.palabra.split('').map((l, i) => (<div key={i} className={`w-14 h-20 border-b-8 flex items-center justify-center text-5xl font-black ${typed.length > i ? 'text-indigo-600 border-indigo-500' : 'text-slate-200 border-slate-200'}`}>{typed[i] || ''}</div>))}</div>
                 <div className="grid grid-cols-5 gap-2">{"ABCDEÁÉÍÓÚFGHIJKLMNOPQRSTUVZ".split('').map(l => (<button key={l} onClick={() => handleLetterClick(l)} className="p-4 rounded-xl font-black text-2xl active:scale-90 border-b-4 bg-slate-100 text-slate-700 border-slate-300">{l}</button>))}</div>
@@ -562,10 +448,10 @@ const App = () => {
         <div className="w-full max-w-5xl flex flex-col gap-6 px-2">
           <div className="flex justify-around bg-white p-5 rounded-[2.5rem] shadow-lg border-b-4 border-slate-200 relative overflow-hidden">
             {playerScores.slice(0, numPlayers).map((s, i) => (
-              <button 
+              <div 
                 key={i} 
                 onClick={clearMemoryTurn}
-                className={`text-center p-4 rounded-3xl transition-all min-w-[120px] relative border-4 flex flex-col items-center ${currentPlayer === i ? 'bg-indigo-100 border-indigo-400 scale-110 shadow-md ring-4 ring-indigo-50' : 'bg-slate-50 border-transparent opacity-40'}`}
+                className={`text-center p-4 rounded-3xl transition-all min-w-[120px] relative border-4 flex flex-col items-center cursor-pointer ${currentPlayer === i ? 'bg-indigo-100 border-indigo-400 scale-110 shadow-md ring-4 ring-indigo-50' : 'bg-slate-50 border-transparent opacity-40'}`}
               >
                 <div className="flex items-center gap-1 mb-1">
                   <input 
@@ -584,7 +470,7 @@ const App = () => {
                     <span className="text-[10px] font-black uppercase">¡Continuar!</span>
                   </div>
                 )}
-              </button>
+              </div>
             ))}
           </div>
           <div className="grid grid-cols-5 sm:grid-cols-6 lg:grid-cols-10 gap-2 p-3 bg-white rounded-[3rem] shadow-inner border-4 border-slate-50">
@@ -613,10 +499,9 @@ const App = () => {
             <div className="flex-1 space-y-4">
               {matchOptions.left.map(item => {
                 const isSelected = matchSelected.left?.id === item.id;
-                const isLoading = loadingAudioId === `${item.text}-en`;
                 return (
-                  <button key={item.id} onClick={() => { setMatchSelected(prev => ({ ...prev, left: item })); playTTS(item.text, 'en', 'match'); }} className={`w-full min-h-[110px] p-4 rounded-[2rem] font-black border-4 transition-all text-xl shadow-sm flex items-center justify-center gap-2 ${isSelected ? 'bg-blue-500 text-white border-blue-700 scale-105 ring-4 ring-blue-200' : 'bg-white text-slate-700 border-slate-100'}`}>
-                    {item.text}{isLoading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Volume2 className="w-4 h-4 opacity-50"/>}
+                  <button key={item.id} onClick={() => { setMatchSelected(prev => ({ ...prev, left: item })); safeSpeak(item.text, 'en'); }} className={`w-full min-h-[110px] p-4 rounded-[2rem] font-black border-4 transition-all text-xl shadow-sm flex items-center justify-center gap-2 ${isSelected ? 'bg-blue-500 text-white border-blue-700 scale-105 ring-4 ring-blue-200' : 'bg-white text-slate-700 border-slate-100'}`}>
+                    {item.text}<Volume2 className="w-4 h-4 opacity-50"/>
                   </button>
                 );
               })}
@@ -648,7 +533,7 @@ const App = () => {
                 </div>
               </div>
               {stars >= p.costo ? (
-                <button onClick={() => { setStars(s => s - p.costo); playTTS(`¡Genial! Ganaste: ${p.nombre}`, 'es', 'prize'); }} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black text-sm shadow-lg active:translate-y-1 transition-all">RECLAMAR</button>
+                <button onClick={() => { setStars(s => s - p.costo); safeSpeak(`¡Genial! Ganaste: ${p.nombre}`, 'es'); }} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black text-sm shadow-lg active:translate-y-1 transition-all">RECLAMAR</button>
               ) : (
                 <div className="text-center min-w-[100px]">
                   <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden mb-2 border border-slate-200 shadow-inner">
@@ -659,6 +544,62 @@ const App = () => {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* --- VISTAS DE MINI JUEGOS --- */}
+      {view === 'minigames_menu' && (
+        <div className="w-full max-w-md space-y-4 animate-in zoom-in">
+          <div className="relative">
+            <h2 className="text-3xl font-black text-center text-orange-600 uppercase mb-6">Mini Juegos</h2>
+          </div>
+          <p className="text-center text-sm font-bold text-slate-500 mb-4 bg-orange-50 p-3 rounded-xl border border-orange-100">
+            Gana 2 estrellas rápidas por acierto
+          </p>
+          <MenuButton icon={<Calculator className="w-8 h-8"/>} label="Mate Mágica" color="bg-blue-100" onClick={initMathGame} />
+          <MenuButton icon={<Eye className="w-8 h-8"/>} label="Ojo de Águila" color="bg-emerald-100" onClick={initCountGame} />
+        </div>
+      )}
+
+      {view === 'minigame_math' && (
+        <div className={`w-full max-w-md flex flex-col gap-6 animate-in zoom-in ${errorFeedback ? 'animate-shake' : ''}`}>
+          <div className="bg-white rounded-[3.5rem] p-10 shadow-2xl border-8 border-white text-center">
+            <h2 className="text-2xl font-black text-blue-500 uppercase mb-6">¿Cuánto es?</h2>
+            <div className="text-7xl font-black text-slate-800 mb-10 flex justify-center items-center gap-4">
+              <span>{mathGame.num1}</span>
+              <span className="text-blue-500">{mathGame.operator}</span>
+              <span>{mathGame.num2}</span>
+              <span className="text-slate-300">=</span>
+              <span className="text-orange-500">?</span>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              {mathGame.options.map((opt, i) => (
+                <button key={i} onClick={() => handleMathClick(opt)} className="p-6 bg-slate-100 hover:bg-blue-50 active:scale-95 border-b-4 border-slate-300 hover:border-blue-300 rounded-3xl text-4xl font-black text-slate-700 transition-all">
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {view === 'minigame_count' && (
+        <div className={`w-full max-w-md flex flex-col gap-6 animate-in zoom-in ${errorFeedback ? 'animate-shake' : ''}`}>
+          <div className="bg-white rounded-[3.5rem] p-8 shadow-2xl border-8 border-white text-center">
+            <h2 className="text-2xl font-black text-emerald-500 uppercase mb-4">¿Cuántos hay?</h2>
+            <div className="flex flex-wrap justify-center gap-4 mb-8 min-h-[120px] content-center bg-emerald-50 p-6 rounded-3xl">
+              {Array.from({length: countGame.count}).map((_, i) => (
+                <span key={i} className="text-5xl animate-in fade-in" style={{ animationDelay: `${i * 0.1}s` }}>{countGame.emoji}</span>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              {countGame.options.map((opt, i) => (
+                <button key={i} onClick={() => handleCountClick(opt)} className="p-6 bg-slate-100 hover:bg-emerald-50 active:scale-95 border-b-4 border-slate-300 hover:border-emerald-300 rounded-3xl text-4xl font-black text-slate-700 transition-all">
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
