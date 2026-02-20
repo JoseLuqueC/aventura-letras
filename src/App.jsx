@@ -5,12 +5,8 @@ import {
   SpellCheck, Brain, LayoutGrid, Languages, Gift,
   Film, Pizza, Utensils, RotateCcw,
   UserCircle, Edit2, BookOpen, Palette, Popcorn,
-<<<<<<< HEAD
   TabletSmartphone, AlertCircle, Users,
   Gamepad2, Calculator, Eye
-=======
-  TabletSmartphone, AlertCircle, Users
->>>>>>> ec822ec1d413bc22c6afa4e4711ed93fd733ec05
 } from 'lucide-react';
 
 // --- DATA ---
@@ -125,7 +121,6 @@ const App = () => {
   const [matchOptions, setMatchOptions] = useState({ left: [], right: [] });
   const [matchSelected, setMatchSelected] = useState({ left: null, right: null });
 
-<<<<<<< HEAD
   // --- ESTADOS MINI JUEGOS ---
   const [mathGame, setMathGame] = useState({ num1: 1, num2: 1, operator: '+', options: [], answer: 2 });
   const [countGame, setCountGame] = useState({ emoji: '🍎', count: 3, options: [] });
@@ -141,19 +136,6 @@ const App = () => {
     }
   }, []);
 
-=======
-  // --- SAFE TTS (A PRUEBA DE FALLOS) ---
-  useEffect(() => {
-    // Verificar soporte al cargar
-    if (!('speechSynthesis' in window)) {
-      setTtsSupported(false);
-    } else {
-      // Truco para cargar voces en Chrome/Android
-      window.speechSynthesis.getVoices();
-    }
-  }, []);
-
->>>>>>> ec822ec1d413bc22c6afa4e4711ed93fd733ec05
   const safeSpeak = (text, lang = 'es') => {
     if (!ttsSupported) return;
 
@@ -184,15 +166,11 @@ const App = () => {
 
   const handleBack = () => {
     // PRIORIDAD 1: Cambiar vista
-<<<<<<< HEAD
     if (view.startsWith('minigame_') && view !== 'minigames_menu') {
       setView('minigames_menu');
     } else {
       setView('menu');
     }
-=======
-    setView('menu');
->>>>>>> ec822ec1d413bc22c6afa4e4711ed93fd733ec05
     
     // PRIORIDAD 2: Limpiar audio (en segundo plano, sin bloquear)
     setTimeout(() => {
