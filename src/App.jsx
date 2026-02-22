@@ -62,11 +62,11 @@ const VOCABULARIO_PAREJAS = [
   { eng: 'Zebra', esp: 'Cebra', emoji: '🦓' },
 ];
 
-// LISTA DE DELETREO ACTUALIZADA (Método Silábico Básico)
+// LISTA DE DELETREO ACTUALIZADA (Visuales coherentes con estándar Unicode)
 const PALABRAS_DELETREO = [
   { palabra: 'SOPA', emoji: '🥣' },
-  { palabra: 'MOMIA', emoji: '🧟' },
-  { palabra: 'MESA', emoji: '🪑' },
+  { palabra: 'MOMIA', emoji: '🤕' }, // Cara vendada (Asociación visual directa)
+  { palabra: 'MESA', emoji: '🍽️' }, // Mesa de comer
   { palabra: 'MINA', emoji: '⛏️' },
   { palabra: 'MASA', emoji: '🥟' },
   { palabra: 'AMA', emoji: '❤️' },
