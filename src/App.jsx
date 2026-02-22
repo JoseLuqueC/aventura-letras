@@ -62,17 +62,18 @@ const VOCABULARIO_PAREJAS = [
   { eng: 'Zebra', esp: 'Cebra', emoji: '🦓' },
 ];
 
+// LISTA DE DELETREO ACTUALIZADA (Método Silábico Básico)
 const PALABRAS_DELETREO = [
-  { palabra: 'MAMÁ', emoji: '👩' },
-  { palabra: 'PAPÁ', emoji: '👨' },
   { palabra: 'SOPA', emoji: '🥣' },
-  { palabra: 'SAPO', emoji: '🐸' },
-  { palabra: 'AVIÓN', emoji: '✈️' },
-  { palabra: 'HIELO', emoji: '🧊' },
-  { palabra: 'QUESO', emoji: '🧀' },
-  { palabra: 'ZAPATO', emoji: '👟' },
-  { palabra: 'COMIDA', emoji: '🍽️' },
-  { palabra: 'PELOTA', emoji: '🏀' },
+  { palabra: 'MOMIA', emoji: '🧟' },
+  { palabra: 'MESA', emoji: '🪑' },
+  { palabra: 'MINA', emoji: '⛏️' },
+  { palabra: 'MASA', emoji: '🥟' },
+  { palabra: 'AMA', emoji: '❤️' },
+  { palabra: 'PAN', emoji: '🍞' },
+  { palabra: 'PATO', emoji: '🦆' },
+  { palabra: 'PELO', emoji: '💇' },
+  { palabra: 'PESA', emoji: '🏋️' },
 ];
 
 const PREMIOS = [
@@ -260,7 +261,7 @@ const App = () => {
         const newScores = [...playerScores];
         newScores[currentPlayer] += 1;
         setPlayerScores(newScores);
-        setStars(s => s + 2);
+        setStars(s => s + 2); // Nerfeado a 2 estrellas
         setSelectedCards([]);
       } else {
         setWaitingToClear(true);
@@ -287,13 +288,13 @@ const App = () => {
       const newTyped = typed + l;
       setTyped(newTyped);
       if (newTyped === item.palabra) {
-        setStars(s => s + 5);
+        setStars(s => s + 5); // Nerfeado a 5 estrellas
         safeSpeak("¡Muy bien! " + item.palabra, 'es');
         setSpellingIdx((spellingIdx + 1) % PALABRAS_DELETREO.length);
         setTyped('');
       }
     } else {
-      setStars(s => Math.max(0, s - 1));
+      setStars(s => Math.max(0, s - 1)); // Penalización ajustada
       setErrorFeedback(true);
       setTimeout(() => setErrorFeedback(false), 500);
     }
@@ -365,7 +366,7 @@ const App = () => {
   const handleReactionClick = (idx) => {
     if (idx === reactionPos) {
       playBeep('success');
-      setStars(s => s + 1);
+      setStars(s => s + 1); // Este se mantiene en 1 estrella
       setReactionHits(h => {
         const newHits = h + 1;
         hitsRef.current = newHits; 
@@ -409,7 +410,7 @@ const App = () => {
 
   const handleMathClick = (opt) => {
     if (opt === mathGame.answer) {
-      setStars(s => s + 1);
+      setStars(s => s + 1); // Nerfeado a 1 estrella
       safeSpeak("¡Correcto! Qué inteligente", 'es');
       setTimeout(initMathGame, 1000);
     } else {
@@ -437,7 +438,7 @@ const App = () => {
 
   const handleCountClick = (opt) => {
     if (opt === countGame.count) {
-      setStars(s => s + 1);
+      setStars(s => s + 1); // Nerfeado a 1 estrella
       safeSpeak("¡Excelente vista!", 'es');
       setTimeout(initCountGame, 1000);
     } else {
@@ -450,14 +451,14 @@ const App = () => {
   useEffect(() => {
     if (matchSelected.left && matchSelected.right) {
       if (matchSelected.left.match === matchSelected.right.id) {
-        setStars(s => s + 5);
+        setStars(s => s + 5); // Nerfeado a 5 estrellas
         setMatchOptions(prev => ({
           left: prev.left.filter(i => i.id !== matchSelected.left.id),
           right: prev.right.filter(i => i.id !== matchSelected.right.id)
         }));
         safeSpeak("¡Correcto!", "es");
       } else {
-        setStars(s => Math.max(0, s - 2));
+        setStars(s => Math.max(0, s - 2)); // Penalización ajustada
         setErrorFeedback(true);
         setTimeout(() => setErrorFeedback(false), 500);
       }
@@ -502,7 +503,7 @@ const App = () => {
           <MenuButton icon={<Gamepad2 className="w-8 h-8"/>} label="Mini Juegos" color="bg-orange-100" onClick={() => setView('minigames_menu')} />
           
           <div className="mt-8 pt-8 border-t border-slate-200 w-full flex justify-center">
-            <button onClick={() => { if(window.confirm("¿Borrar progreso?")) { setStars(0); setAlphabetIdx(0); setSpellingIdx(0); } }} className="text-xs text-slate-400 flex items-center gap-1"><RotateCcw className="w-3 h-3"/> Resetear</button>
+            <button onClick={() => { if(window.confirm("¿Borrar progreso?")) { setStars(0); setAlphabetIdx(0); setSpellingIdx(0); setPurchases([]); } }} className="text-xs text-slate-400 flex items-center gap-1"><RotateCcw className="w-3 h-3"/> Resetear</button>
           </div>
         </div>
       )}
@@ -553,7 +554,7 @@ const App = () => {
                       try { window.speechSynthesis.cancel(); } catch (e) {}
                       setIsPlaying(true);
                       const u = new SpeechSynthesisUtterance(item.letra);
-                      u.lang = isEs ? 'es-ES' : 'en-US'; // Pronuncia la letra en el idioma actual
+                      u.lang = isEs ? 'es-ES' : 'en-US'; 
                       u.onend = () => setIsPlaying(false);
                       u.onerror = () => setIsPlaying(false);
                       window.speechSynthesis.speak(u);
@@ -584,7 +585,7 @@ const App = () => {
                 <button 
                   disabled={!ready} 
                   onClick={() => { 
-                    setStars(s => s+2); 
+                    setStars(s => s+2); // Nerfeado a 2 estrellas
                     setAlphabetIdx(alphabetIdx+1); 
                     setHeardEsp(false); 
                     setHeardEng(false); 
@@ -703,7 +704,7 @@ const App = () => {
       )}
 
       {view === 'prizes' && (
-        <div className="flex-1 w-full max-w-md flex flex-col gap-4 animate-in px-2">
+        <div className="flex-1 w-full max-w-md flex flex-col gap-4 animate-in px-2 pb-10">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-3xl font-black text-indigo-900 uppercase tracking-tighter drop-shadow-sm">Tienda</h2>
             <button onClick={() => setView('history')} className="bg-indigo-100 px-4 py-2 rounded-full text-indigo-700 active:scale-95 transition-transform flex gap-2 items-center text-xs font-black uppercase"><History className="w-4 h-4"/> Historial</button>
@@ -765,6 +766,7 @@ const App = () => {
               }, {})).map(group => {
                 const prize = PREMIOS.find(p => p.id === group[0].prizeId);
                 const isExpanded = expandedHistory === prize.id;
+                // El grupo ya está ordenado del más nuevo al más viejo por cómo los insertamos (unshift)
                 const latestDate = new Date(group[0].timestamp);
                 
                 return (
@@ -857,7 +859,6 @@ const App = () => {
                     return (
                       <button
                         key={i}
-                        // INGENIERÍA: onPointerDown elimina el retraso de 300ms de los navegadores móviles
                         onPointerDown={(e) => {
                           e.preventDefault(); 
                           handleReactionClick(i);
