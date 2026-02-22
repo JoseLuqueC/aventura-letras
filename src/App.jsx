@@ -6,7 +6,8 @@ import {
   Film, Pizza, Utensils, RotateCcw,
   UserCircle, Edit2, BookOpen, Palette, Popcorn,
   TabletSmartphone, AlertCircle, Users,
-  Gamepad2, Calculator, Eye, Zap, Type
+  Gamepad2, Calculator, Eye, Zap, Type,
+  Clock, ChevronDown, ChevronUp, History
 } from 'lucide-react';
 
 // --- DATA ---
@@ -92,9 +93,13 @@ const App = () => {
   const [alphabetIdx, setAlphabetIdx] = useState(() => { try { return parseInt(localStorage.getItem('aventura_alphabetIdx') || 0, 10); } catch { return 0; } });
   const [spellingIdx, setSpellingIdx] = useState(() => { try { return parseInt(localStorage.getItem('aventura_spellingIdx') || 0, 10); } catch { return 0; } });
 
+  const [purchases, setPurchases] = useState(() => { try { return JSON.parse(localStorage.getItem('aventura_purchases')) || []; } catch { return []; } });
+  const [expandedHistory, setExpandedHistory] = useState(null);
+
   useEffect(() => { localStorage.setItem('aventura_stars', stars); }, [stars]);
   useEffect(() => { localStorage.setItem('aventura_alphabetIdx', alphabetIdx); }, [alphabetIdx]);
   useEffect(() => { localStorage.setItem('aventura_spellingIdx', spellingIdx); }, [spellingIdx]);
+  useEffect(() => { localStorage.setItem('aventura_purchases', JSON.stringify(purchases)); }, [purchases]);
 
   const [view, setView] = useState('menu'); 
   const [errorFeedback, setErrorFeedback] = useState(false);
@@ -212,6 +217,8 @@ const App = () => {
       setView('menu_math');
     } else if (view === 'minigame_reaction') {
       setView('minigames_menu');
+    } else if (view === 'history') {
+      setView('prizes');
     } else {
       setView('menu');
     }
@@ -253,7 +260,7 @@ const App = () => {
         const newScores = [...playerScores];
         newScores[currentPlayer] += 1;
         setPlayerScores(newScores);
-        setStars(s => s + 5);
+        setStars(s => s + 2);
         setSelectedCards([]);
       } else {
         setWaitingToClear(true);
@@ -280,13 +287,13 @@ const App = () => {
       const newTyped = typed + l;
       setTyped(newTyped);
       if (newTyped === item.palabra) {
-        setStars(s => s + 10);
+        setStars(s => s + 5);
         safeSpeak("¡Muy bien! " + item.palabra, 'es');
         setSpellingIdx((spellingIdx + 1) % PALABRAS_DELETREO.length);
         setTyped('');
       }
     } else {
-      setStars(s => Math.max(0, s - 2));
+      setStars(s => Math.max(0, s - 1));
       setErrorFeedback(true);
       setTimeout(() => setErrorFeedback(false), 500);
     }
@@ -402,7 +409,7 @@ const App = () => {
 
   const handleMathClick = (opt) => {
     if (opt === mathGame.answer) {
-      setStars(s => s + 2);
+      setStars(s => s + 1);
       safeSpeak("¡Correcto! Qué inteligente", 'es');
       setTimeout(initMathGame, 1000);
     } else {
@@ -430,7 +437,7 @@ const App = () => {
 
   const handleCountClick = (opt) => {
     if (opt === countGame.count) {
-      setStars(s => s + 2);
+      setStars(s => s + 1);
       safeSpeak("¡Excelente vista!", 'es');
       setTimeout(initCountGame, 1000);
     } else {
@@ -443,14 +450,14 @@ const App = () => {
   useEffect(() => {
     if (matchSelected.left && matchSelected.right) {
       if (matchSelected.left.match === matchSelected.right.id) {
-        setStars(s => s + 10);
+        setStars(s => s + 5);
         setMatchOptions(prev => ({
           left: prev.left.filter(i => i.id !== matchSelected.left.id),
           right: prev.right.filter(i => i.id !== matchSelected.right.id)
         }));
         safeSpeak("¡Correcto!", "es");
       } else {
-        setStars(s => Math.max(0, s - 5));
+        setStars(s => Math.max(0, s - 2));
         setErrorFeedback(true);
         setTimeout(() => setErrorFeedback(false), 500);
       }
@@ -577,7 +584,7 @@ const App = () => {
                 <button 
                   disabled={!ready} 
                   onClick={() => { 
-                    setStars(s => s+5); 
+                    setStars(s => s+2); 
                     setAlphabetIdx(alphabetIdx+1); 
                     setHeardEsp(false); 
                     setHeardEng(false); 
@@ -697,7 +704,10 @@ const App = () => {
 
       {view === 'prizes' && (
         <div className="flex-1 w-full max-w-md flex flex-col gap-4 animate-in px-2">
-          <h2 className="text-3xl font-black text-indigo-900 text-center mb-4 uppercase tracking-tighter drop-shadow-sm">Tienda de Premios</h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-3xl font-black text-indigo-900 uppercase tracking-tighter drop-shadow-sm">Tienda</h2>
+            <button onClick={() => setView('history')} className="bg-indigo-100 px-4 py-2 rounded-full text-indigo-700 active:scale-95 transition-transform flex gap-2 items-center text-xs font-black uppercase"><History className="w-4 h-4"/> Historial</button>
+          </div>
           {PREMIOS.map(p => (
             <div key={p.id} className="bg-white p-6 rounded-[2.5rem] flex items-center justify-between border-4 border-slate-50 shadow-md">
               <div className="flex items-center gap-5">
@@ -708,7 +718,21 @@ const App = () => {
                 </div>
               </div>
               {stars >= p.costo ? (
-                <button onClick={() => { setStars(s => s - p.costo); safeSpeak(`¡Genial! Ganaste: ${p.nombre}`, 'es'); }} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black text-sm shadow-lg active:translate-y-1 transition-all">RECLAMAR</button>
+                <button 
+                  onClick={() => { 
+                    setStars(s => s - p.costo); 
+                    const newPurchase = {
+                      id: Date.now() + Math.random(),
+                      prizeId: p.id,
+                      timestamp: new Date().toISOString()
+                    };
+                    setPurchases(prev => [newPurchase, ...prev]);
+                    safeSpeak(`¡Genial! Ganaste: ${p.nombre}`, 'es'); 
+                  }} 
+                  className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black text-sm shadow-lg active:translate-y-1 transition-all"
+                >
+                  RECLAMAR
+                </button>
               ) : (
                 <div className="text-center min-w-[100px]">
                   <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden mb-2 border border-slate-200 shadow-inner">
@@ -719,6 +743,72 @@ const App = () => {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* --- HISTORIAL DE COMPRAS --- */}
+      {view === 'history' && (
+        <div className="flex-1 w-full max-w-md flex flex-col gap-4 animate-in px-2 pb-10">
+          <h2 className="text-3xl font-black text-indigo-900 text-center mb-6 uppercase tracking-tighter drop-shadow-sm">Historial de Compras</h2>
+          
+          {purchases.length === 0 ? (
+            <div className="text-center text-slate-400 p-10 bg-slate-100 rounded-[2.5rem] border-4 border-dashed border-slate-200">
+              <Gift className="w-12 h-12 mx-auto mb-3 opacity-50"/>
+              <p className="font-bold">Aún no hay regalos comprados.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {Object.values(purchases.reduce((acc, curr) => {
+                if (!acc[curr.prizeId]) acc[curr.prizeId] = [];
+                acc[curr.prizeId].push(curr);
+                return acc;
+              }, {})).map(group => {
+                const prize = PREMIOS.find(p => p.id === group[0].prizeId);
+                const isExpanded = expandedHistory === prize.id;
+                const latestDate = new Date(group[0].timestamp);
+                
+                return (
+                  <div key={prize.id} className="bg-white rounded-[2rem] border-4 border-slate-50 shadow-md overflow-hidden">
+                    <div 
+                      onClick={() => setExpandedHistory(isExpanded ? null : prize.id)}
+                      className="p-5 flex items-center justify-between cursor-pointer active:bg-slate-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="bg-indigo-50 p-3 rounded-2xl">{prize.icon}</div>
+                        <div>
+                          <p className="font-black text-slate-800 leading-tight">{prize.nombre}</p>
+                          <p className="text-[11px] font-bold text-slate-400 uppercase flex items-center gap-1 mt-1">
+                            <Clock className="w-3 h-3"/> 
+                            {latestDate.toLocaleDateString('es-CO')} - {latestDate.toLocaleTimeString('es-CO', {hour: '2-digit', minute:'2-digit'})}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="bg-indigo-100 text-indigo-600 font-black text-sm px-3 py-1 rounded-full">x{group.length}</span>
+                        {isExpanded ? <ChevronUp className="text-slate-400 w-5 h-5"/> : <ChevronDown className="text-slate-400 w-5 h-5"/>}
+                      </div>
+                    </div>
+                    
+                    {isExpanded && (
+                      <div className="bg-slate-50 p-4 border-t border-slate-100 flex flex-col gap-2">
+                        {group.map((purchase, idx) => {
+                          const pDate = new Date(purchase.timestamp);
+                          return (
+                            <div key={purchase.id} className="flex justify-between items-center text-sm py-2 px-4 bg-white rounded-xl shadow-sm border border-slate-100">
+                              <span className="font-bold text-slate-600">Compra #{group.length - idx}</span>
+                              <span className="text-slate-500 font-medium">
+                                {pDate.toLocaleDateString('es-CO')} a las {pDate.toLocaleTimeString('es-CO', {hour: '2-digit', minute:'2-digit'})}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
