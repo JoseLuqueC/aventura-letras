@@ -183,14 +183,11 @@ const App = () => {
   const safeSpeak = (text, lang = 'es') => {
     if (!ttsSupported) return;
 
-    // 1. Cancelar cualquier audio previo (Try-catch para seguridad)
     try { window.speechSynthesis.cancel(); } catch (e) { console.error(e); }
 
     const utterance = new SpeechSynthesisUtterance(text);
     
-    // 2. Configuración MÍNIMA para máxima compatibilidad
     utterance.lang = lang === 'es' ? 'es-ES' : 'en-US';
-    // Removemos rate y pitch para evitar crashes en motores viejos de tablet
     
     utterance.onstart = () => setIsPlaying(true);
     utterance.onend = () => setIsPlaying(false);
@@ -199,7 +196,6 @@ const App = () => {
       setIsPlaying(false);
     };
 
-    // 3. Disparar
     try {
       window.speechSynthesis.speak(utterance);
     } catch (e) {
@@ -210,7 +206,7 @@ const App = () => {
 
   const handleBack = () => {
     // PRIORIDAD 1: Cambiar vista (Manejo de Pila de Navegación)
-    if (['alphabet', 'spelling'].includes(view)) {
+    if (['alphabet_es', 'alphabet_en', 'spelling'].includes(view)) {
       setView('menu_letras');
     } else if (['minigame_math', 'minigame_count'].includes(view)) {
       setView('menu_math');
@@ -465,7 +461,6 @@ const App = () => {
   return (
     <div className={`min-h-screen p-4 font-sans select-none flex flex-col items-center transition-colors duration-300 ${errorFeedback ? 'bg-red-100' : 'bg-slate-50'}`}>
       <div className="w-full max-w-2xl flex justify-between items-center mb-6">
-        {/* BOTÓN ATRÁS CORREGIDO: Lógica desacoplada */}
         <button onClick={handleBack} className="bg-white p-3 rounded-2xl shadow-sm text-indigo-500 active:scale-95 border border-indigo-50 cursor-pointer z-50">
           <ArrowLeft/>
         </button>
@@ -484,7 +479,6 @@ const App = () => {
         <div className="w-full max-w-md space-y-4 animate-in zoom-in">
           <h1 className="text-4xl font-black text-indigo-900 text-center mb-8 uppercase tracking-tighter">Mis Desafíos</h1>
           
-          {/* INDICADOR DE ESTADO DE AUDIO */}
           <div className={`p-4 rounded-xl flex items-center gap-3 border mb-6 ${ttsSupported ? 'bg-blue-50 border-blue-100' : 'bg-red-50 border-red-100'}`}>
             {ttsSupported ? <TabletSmartphone className="w-6 h-6 text-blue-500" /> : <AlertCircle className="w-6 h-6 text-red-500" />}
             <p className={`text-xs font-bold leading-tight ${ttsSupported ? 'text-blue-600' : 'text-red-600'}`}>
@@ -506,13 +500,15 @@ const App = () => {
         </div>
       )}
 
-      {/* --- SUB-MENÚS (UX ARCHITECTURE) --- */}
+      {/* --- SUB-MENÚS --- */}
       {view === 'menu_letras' && (
         <div className="w-full max-w-md space-y-4 animate-in zoom-in">
           <div className="relative mb-6">
             <h2 className="text-3xl font-black text-center text-pink-600 uppercase">Letras</h2>
           </div>
-          <MenuButton icon={<LayoutGrid className="w-8 h-8"/>} label="Abecedario Mágico" color="bg-pink-100" onClick={() => setView('alphabet')} />
+          {/* SEPARACIÓN DEL ABECEDARIO POR IDIOMAS */}
+          <MenuButton icon={<LayoutGrid className="w-8 h-8"/>} label="Abecedario (Español)" color="bg-pink-100" onClick={() => { setView('alphabet_es'); setHeardEsp(false); }} />
+          <MenuButton icon={<Languages className="w-8 h-8"/>} label="Abecedario (Inglés)" color="bg-indigo-100" onClick={() => { setView('alphabet_en'); setHeardEng(false); }} />
           <MenuButton icon={<SpellCheck className="w-8 h-8"/>} label="Escuela de Deletreo" color="bg-blue-100" onClick={() => setView('spelling')} />
         </div>
       )}
@@ -527,54 +523,70 @@ const App = () => {
         </div>
       )}
 
-      {view === 'alphabet' && (
+      {/* --- ABECEDARIO PARAMETRIZADO (DRY) --- */}
+      {(view === 'alphabet_es' || view === 'alphabet_en') && (
         <div className="w-full max-w-md flex flex-col gap-6 animate-in slide-in-from-right">
           {(() => {
+            const isEs = view === 'alphabet_es';
             const item = VOCABULARIO_ABC[alphabetIdx % VOCABULARIO_ABC.length];
-            const ready = heardEsp && heardEng;
+            const ready = isEs ? heardEsp : heardEng;
+            
+            // Extracción de datos según el idioma activo
+            const word = isEs ? item.esp : item.eng;
+            const emoji = isEs ? item.emojiEsp : item.emojiEng;
+            const langCode = isEs ? 'es' : 'en';
+
             return (
               <>
                 <div className="bg-white rounded-[3rem] p-8 shadow-2xl border-8 border-white text-center relative">
-                  {/* Se agregó onClick asíncrono en cola (Español -> Inglés) y la minúscula */}
+                  
                   <h2 
                     onClick={() => {
                       if (!ttsSupported) return;
-                      try { window.speechSynthesis.cancel(); } catch (e) {} // Limpiamos bloqueos previos
+                      try { window.speechSynthesis.cancel(); } catch (e) {}
                       setIsPlaying(true);
-                      
-                      const uEs = new SpeechSynthesisUtterance(item.letra);
-                      uEs.lang = 'es-ES';
-                      
-                      const uEn = new SpeechSynthesisUtterance(item.letra);
-                      uEn.lang = 'en-US';
-                      uEn.onend = () => setIsPlaying(false);
-                      uEn.onerror = () => setIsPlaying(false);
-
-                      // Al encolarlas, el navegador las reproduce en orden automático
-                      window.speechSynthesis.speak(uEs);
-                      window.speechSynthesis.speak(uEn);
+                      const u = new SpeechSynthesisUtterance(item.letra);
+                      u.lang = isEs ? 'es-ES' : 'en-US'; // Pronuncia la letra en el idioma actual
+                      u.onend = () => setIsPlaying(false);
+                      u.onerror = () => setIsPlaying(false);
+                      window.speechSynthesis.speak(u);
                     }}
                     className="flex justify-center items-baseline gap-4 mb-10 cursor-pointer active:scale-90 transition-transform"
                   >
                     <span className="text-[10rem] font-black text-indigo-600 leading-none">{item.letra}</span>
                     <span className="text-[8rem] font-black text-indigo-300 leading-none">{item.letra.toLowerCase()}</span>
                   </h2>
+
                   <div className="grid gap-6">
-                    <button onClick={() => { safeSpeak(item.esp, 'es'); setHeardEsp(true); }} className={`p-5 rounded-[2.5rem] border-4 flex flex-col items-center gap-2 transition-all ${heardEsp ? 'bg-green-50 border-green-400' : 'bg-pink-50 border-pink-100 active:scale-95'}`}>
-                      <span className="text-6xl mb-1">{item.emojiEsp}</span>
-                      <div className="flex items-center gap-3"><span className="text-2xl font-black text-pink-600 uppercase">{item.esp}</span>
-                        {isPlaying ? <Volume2 className="animate-pulse text-indigo-500" /> : <Volume2 className={heardEsp ? 'text-green-500' : 'text-pink-300'}/>}
-                      </div>
-                    </button>
-                    <button onClick={() => { safeSpeak(item.eng, 'en'); setHeardEng(true); }} className={`p-5 rounded-[2.5rem] border-4 flex flex-col items-center gap-2 transition-all ${heardEng ? 'bg-green-50 border-green-400' : 'bg-blue-50 border-blue-100 active:scale-95'}`}>
-                      <span className="text-6xl mb-1">{item.emojiEng}</span>
-                      <div className="flex items-center gap-3"><span className="text-2xl font-black text-blue-600 uppercase">{item.eng}</span>
-                        {isPlaying ? <Volume2 className="animate-pulse text-indigo-500" /> : <Volume2 className={heardEng ? 'text-green-500' : 'text-blue-300'}/>}
+                    <button 
+                      onClick={() => { 
+                        safeSpeak(word, langCode); 
+                        if (isEs) setHeardEsp(true); else setHeardEng(true); 
+                      }} 
+                      className={`p-5 rounded-[2.5rem] border-4 flex flex-col items-center gap-2 transition-all ${ready ? 'bg-green-50 border-green-400' : 'bg-indigo-50 border-indigo-100 active:scale-95'}`}
+                    >
+                      <span className="text-6xl mb-1">{emoji}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl font-black text-indigo-600 uppercase">{word}</span>
+                        {isPlaying ? <Volume2 className="animate-pulse text-indigo-500" /> : <Volume2 className={ready ? 'text-green-500' : 'text-indigo-300'}/>}
                       </div>
                     </button>
                   </div>
+
                 </div>
-                <button disabled={!ready} onClick={() => { setStars(s => s+5); setAlphabetIdx(alphabetIdx+1); setHeardEsp(false); setHeardEng(false); try { window.speechSynthesis.cancel(); } catch(e){} }} className={`py-6 rounded-[2.5rem] text-3xl font-black shadow-xl border-b-8 flex items-center justify-center gap-3 transition-all ${ready ? 'bg-indigo-600 border-indigo-800 text-white active:translate-y-1 active:border-b-4' : 'bg-slate-300 border-slate-400 text-slate-100 cursor-not-allowed'}`}>{!ready ? <Lock className="w-8 h-8" /> : <Sparkles className="w-8 h-8" />} SIGUIENTE</button>
+                <button 
+                  disabled={!ready} 
+                  onClick={() => { 
+                    setStars(s => s+5); 
+                    setAlphabetIdx(alphabetIdx+1); 
+                    setHeardEsp(false); 
+                    setHeardEng(false); 
+                    try { window.speechSynthesis.cancel(); } catch(e){} 
+                  }} 
+                  className={`py-6 rounded-[2.5rem] text-3xl font-black shadow-xl border-b-8 flex items-center justify-center gap-3 transition-all ${ready ? 'bg-indigo-600 border-indigo-800 text-white active:translate-y-1 active:border-b-4' : 'bg-slate-300 border-slate-400 text-slate-100 cursor-not-allowed'}`}
+                >
+                  {!ready ? <Lock className="w-8 h-8" /> : <Sparkles className="w-8 h-8" />} SIGUIENTE
+                </button>
               </>
             );
           })()}
@@ -723,7 +735,7 @@ const App = () => {
         </div>
       )}
 
-      {/* VISTA DE REACCIÓN MODIFICADA (CUADRÍCULA DINÁMICA) */}
+      {/* VISTA DE REACCIÓN MODIFICADA (USANDO ONPOINTERDOWN PARA CERO LATENCIA) */}
       {view === 'minigame_reaction' && (
         <div className={`w-full max-w-md flex flex-col gap-6 animate-in zoom-in ${errorFeedback ? 'animate-shake' : ''}`}>
           <div className="bg-white rounded-[3.5rem] p-8 shadow-2xl border-8 border-white text-center">
@@ -736,17 +748,16 @@ const App = () => {
               </div>
             </div>
             
-            {/* INGENIERÍA DE UI: Grid Dinámica por Nivel */}
             {(() => {
               const currentLevel = Math.floor(reactionHits / 20);
               const gridLevel = Math.max(0, currentLevel - 2);
-              const gridSize = Math.min(5, 3 + gridLevel); // 3x3, 4x4, 5x5
+              const gridSize = Math.min(5, 3 + gridLevel); 
               const totalSquares = Math.pow(gridSize, 2);
               const emojiSize = gridSize === 3 ? 'text-5xl' : gridSize === 4 ? 'text-4xl' : 'text-3xl';
 
               return (
                 <div 
-                  className="grid gap-2 bg-orange-50 p-4 rounded-3xl transition-all duration-300"
+                  className="grid gap-2 bg-orange-50 p-4 rounded-3xl transition-all duration-300 touch-none"
                   style={{ gridTemplateColumns: `repeat(${gridSize}, minmax(0, 1fr))` }}
                 >
                   {Array.from({length: totalSquares}).map((_, i) => {
@@ -756,7 +767,11 @@ const App = () => {
                     return (
                       <button
                         key={i}
-                        onClick={() => handleReactionClick(i)}
+                        // INGENIERÍA: onPointerDown elimina el retraso de 300ms de los navegadores móviles
+                        onPointerDown={(e) => {
+                          e.preventDefault(); 
+                          handleReactionClick(i);
+                        }}
                         className={`aspect-square rounded-xl flex items-center justify-center transition-all duration-75 ${emojiSize} ${
                           isFrog 
                           ? 'bg-green-400 scale-105 shadow-md active:scale-90' 
