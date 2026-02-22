@@ -125,9 +125,49 @@ const App = () => {
   const [mathGame, setMathGame] = useState({ num1: 1, num2: 1, operator: '+', options: [], answer: 2 });
   const [countGame, setCountGame] = useState({ emoji: '🍎', count: 3, options: [] });
 
-  // --- ESTADOS JUEGO LÚDICO (REACCIÓN) ---
+  // --- ESTADOS JUEGO LÚDICO (REACCIÓN ESPACIAL) ---
   const [reactionPos, setReactionPos] = useState(-1);
+  const [dangerPos, setDangerPos] = useState(-1); 
   const [reactionHits, setReactionHits] = useState(0);
+  const hitsRef = useRef(0); 
+
+  // --- MOTOR DE SONIDO (BEEPS DE CERO LATENCIA) ---
+  const audioCtxRef = useRef(null);
+  const playBeep = (type) => {
+    try {
+      if (!audioCtxRef.current) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        audioCtxRef.current = new AudioContext();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+      
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      const now = ctx.currentTime;
+      if (type === 'success') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, now);
+        osc.frequency.exponentialRampToValueAtTime(1200, now + 0.1);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+      } else if (type === 'error') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.2);
+      }
+    } catch(e) { console.error("Audio API error", e); }
+  };
 
   // --- SAFE TTS (A PRUEBA DE FALLOS) ---
   useEffect(() => {
@@ -267,28 +307,74 @@ const App = () => {
     setView('match_game');
   };
 
-  // --- LOGICA JUEGO REACCIÓN LÚDICA ---
+  // --- LOGICA JUEGO REACCIÓN LÚDICA (ESCALONADO POR ACIERTOS Y ESPACIO) ---
   const initReactionGame = () => {
     setReactionHits(0);
-    setReactionPos(4); // Centro
+    hitsRef.current = 0;
+    setReactionPos(4); 
+    setDangerPos(-1);
     setView('minigame_reaction');
   };
 
   useEffect(() => {
-    let interval;
+    let timeoutId;
+    let isActive = true; 
+    
     if (view === 'minigame_reaction') {
-      interval = setInterval(() => {
-        setReactionPos(Math.floor(Math.random() * 9));
-      }, 750); // Velocidad de aparición (750ms es retador pero justo para 6-8 años)
+      const tick = () => {
+        if (!isActive) return;
+
+        const level = Math.floor(hitsRef.current / 20); // Nivel lógico (0 = Nivel 1)
+        
+        // 1. Dificultad de Velocidad: Aumenta solo hasta Nivel 3 (index 2)
+        const speedLevel = Math.min(level, 2); 
+        const currentDelay = 750 - (speedLevel * 150); // Nivel 1: 750ms, Nivel 2: 600ms, Nivel 3+: 450ms
+
+        // 2. Dificultad Espacial: A partir del Nivel 4 (index 3), la cuadrícula crece
+        const gridLevel = Math.max(0, level - 2); 
+        const gridSize = Math.min(5, 3 + gridLevel); // Topa en 5x5 (25 cuadros) para no colapsar la pantalla
+        const totalSquares = gridSize * gridSize;
+
+        // 3. Aparición (20% probabilidad cangrejo rojo)
+        const isDanger = Math.random() < 0.20; 
+        const randomPos = Math.floor(Math.random() * totalSquares);
+
+        if (isDanger) {
+          setReactionPos(-1);
+          setDangerPos(randomPos);
+        } else {
+          setDangerPos(-1);
+          setReactionPos(randomPos);
+        }
+
+        timeoutId = setTimeout(tick, currentDelay);
+      };
+
+      timeoutId = setTimeout(tick, 750);
     }
-    return () => clearInterval(interval);
+    
+    return () => {
+      isActive = false;
+      clearTimeout(timeoutId);
+    };
   }, [view]);
 
   const handleReactionClick = (idx) => {
     if (idx === reactionPos) {
+      playBeep('success');
       setStars(s => s + 1);
-      setReactionHits(h => h + 1);
-      setReactionPos(-1); // Desaparece al instante para dar feedback de éxito
+      setReactionHits(h => {
+        const newHits = h + 1;
+        hitsRef.current = newHits; 
+        return newHits;
+      });
+      setReactionPos(-1); 
+    } else if (idx === dangerPos) {
+      playBeep('error');
+      setStars(s => Math.max(0, s - 2)); 
+      setDangerPos(-1); 
+      setErrorFeedback(true);
+      setTimeout(() => setErrorFeedback(false), 500);
     }
   };
 
@@ -637,28 +723,57 @@ const App = () => {
         </div>
       )}
 
+      {/* VISTA DE REACCIÓN MODIFICADA (CUADRÍCULA DINÁMICA) */}
       {view === 'minigame_reaction' && (
-        <div className="w-full max-w-md flex flex-col gap-6 animate-in zoom-in">
+        <div className={`w-full max-w-md flex flex-col gap-6 animate-in zoom-in ${errorFeedback ? 'animate-shake' : ''}`}>
           <div className="bg-white rounded-[3.5rem] p-8 shadow-2xl border-8 border-white text-center">
             <h2 className="text-2xl font-black text-orange-500 uppercase mb-2">¡Atrápala!</h2>
-            <p className="text-slate-400 font-bold mb-6">Ranas cazadas: <span className="text-orange-500">{reactionHits}</span></p>
             
-            <div className="grid grid-cols-3 gap-3 bg-orange-50 p-4 rounded-3xl">
-              {Array.from({length: 9}).map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => handleReactionClick(i)}
-                  className={`aspect-square rounded-2xl flex items-center justify-center text-5xl transition-all duration-100 ${
-                    reactionPos === i 
-                    ? 'bg-green-400 scale-105 shadow-md active:scale-90' 
-                    : 'bg-slate-200 opacity-50'
-                  }`}
-                >
-                  {reactionPos === i ? '🐸' : ''}
-                </button>
-              ))}
+            <div className="flex justify-between items-center mb-6 px-4">
+              <p className="text-slate-400 font-bold">Ranas: <span className="text-orange-500">{reactionHits}</span></p>
+              <div className="bg-orange-100 px-3 py-1 rounded-full text-xs font-black text-orange-600 uppercase">
+                Nivel {Math.floor(reactionHits / 20) + 1}
+              </div>
             </div>
-            <p className="text-xs text-slate-400 font-bold mt-6 uppercase">Toca la rana antes de que escape</p>
+            
+            {/* INGENIERÍA DE UI: Grid Dinámica por Nivel */}
+            {(() => {
+              const currentLevel = Math.floor(reactionHits / 20);
+              const gridLevel = Math.max(0, currentLevel - 2);
+              const gridSize = Math.min(5, 3 + gridLevel); // 3x3, 4x4, 5x5
+              const totalSquares = Math.pow(gridSize, 2);
+              const emojiSize = gridSize === 3 ? 'text-5xl' : gridSize === 4 ? 'text-4xl' : 'text-3xl';
+
+              return (
+                <div 
+                  className="grid gap-2 bg-orange-50 p-4 rounded-3xl transition-all duration-300"
+                  style={{ gridTemplateColumns: `repeat(${gridSize}, minmax(0, 1fr))` }}
+                >
+                  {Array.from({length: totalSquares}).map((_, i) => {
+                    const isFrog = reactionPos === i;
+                    const isDanger = dangerPos === i;
+                    
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => handleReactionClick(i)}
+                        className={`aspect-square rounded-xl flex items-center justify-center transition-all duration-75 ${emojiSize} ${
+                          isFrog 
+                          ? 'bg-green-400 scale-105 shadow-md active:scale-90' 
+                          : isDanger
+                            ? 'bg-red-500 scale-105 shadow-lg active:scale-90 animate-pulse border-4 border-red-700'
+                            : 'bg-slate-200 opacity-50'
+                        }`}
+                      >
+                        {isFrog ? '🐸' : isDanger ? '🦀' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            <p className="text-xs text-slate-400 font-bold mt-6 uppercase">Toca la rana. ¡No toques el cangrejo!</p>
           </div>
         </div>
       )}
